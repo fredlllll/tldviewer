@@ -1,0 +1,18 @@
+# Build output
+bin/
+obj/
+Source/0Bins/
+*.user
+
+# Generated artefacts (GLBs, previews, manifests) live outside the repo
+output/
+preview/
+
+# Logs
+*.log
+
+# IDE / OS noise
+.vs/
+.idea/
+.DS_Store
+Thumbs.db
