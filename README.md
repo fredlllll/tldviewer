@@ -15,12 +15,14 @@ texture dump, no per-mesh GLBs.
 | OS | Windows (paths are tuned for the VirtualBox shares `Z:` and `Y:`) |
 | SDK | .NET 10 SDK |
 | Blender | 4.x/5.x, auto-detected under `C:\Program Files\Blender Foundation` |
+| Viewer (optional) | Unity 6 (tested with 6000.3.21f1) |
 | Game | The Long Dark with Wintermute installed, campaign data at `\\VBoxSvr\TheLongDark\tld_dlc\wintermute\tld_Data` |
 
 ## Layout
 
 ```
 src/TldLevels.Exporter/   the CLI (C#)
+src/TldLevels.Viewer/     Unity desktop GLB viewer
 tools/blender/            render_topdown.py, executed inside Blender
 vendor/AssetRipper/       git submodule, tag 2.0.0
 ```
@@ -28,6 +30,14 @@ vendor/AssetRipper/       git submodule, tag 2.0.0
 Generated files are written **outside the repository**, by default to
 `\\VBoxSvr\TLDLevels\tldlevels\levels` (`levelN.glb`, `levelN.png`, `manifest.json`,
 `manifest.csv`, `export.log`). Use `--output` to change that.
+
+## Viewer
+
+`src/TldLevels.Viewer` is a separate Unity 6 project that loads an exported
+level GLB locally and provides fly navigation. Open it from Unity Hub, then run
+`Assets/Scenes/Viewer.unity`. It reads GLBs from the existing output folder by
+default and never invokes the exporter. See its
+[README](src/TldLevels.Viewer/README.md) for setup and controls.
 
 ## Build
 
