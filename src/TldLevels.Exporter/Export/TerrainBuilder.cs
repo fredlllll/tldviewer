@@ -1,9 +1,12 @@
 using AssetRipper.Assets;
 using AssetRipper.Assets.Generics;
 using AssetRipper.SourceGenerated.Classes.ClassID_156;
+using AssetRipper.SourceGenerated.Classes.ClassID_1953259897;
 using AssetRipper.SourceGenerated.Classes.ClassID_218;
 using AssetRipper.SourceGenerated.Classes.ClassID_4;
 using AssetRipper.SourceGenerated.Extensions;
+using AssetRipper.SourceGenerated.Subclasses.PPtr_TerrainLayer;
+using AssetRipper.Export.Modules.Textures;
 using SharpGLTF.Geometry;
 using SharpGLTF.Geometry.VertexTypes;
 using SharpGLTF.Materials;
@@ -116,6 +119,10 @@ public static class TerrainBuilder
 		int h = width;
 
 		MaterialBuilder material = new("TerrainDefault");
+		if (TryGetFirstLayerImage(data, out ImageBuilder? baseImage))
+		{
+			material.WithBaseColor(baseImage);
+		}
 		MeshBuilder<VertexPosition, VertexTexture1, VertexEmpty> meshBuilder = new();
 		var primitive = meshBuilder.UsePrimitive(material);
 		VertexBuilder<VertexPosition, VertexTexture1, VertexEmpty>[] vertices =
@@ -168,6 +175,28 @@ public static class TerrainBuilder
 
 		sceneBuilder.AddRigidMesh(meshBuilder, node);
 		return true;
+	}
+
+	private static bool TryGetFirstLayerImage(ITerrainData data, out ImageBuilder? image)
+	{
+		image = null;
+		if (data.SplatDatabase.TerrainLayers is not { } layers || layers.Count == 0)
+		{
+			return false;
+		}
+
+		IPPtr_TerrainLayer pointer = layers[0];
+		if (!pointer.TryGetAsset(data.Collection, out ITerrainLayer? layer)
+			|| layer?.DiffuseTextureP is not { } texture
+			|| !TextureConverter.TryConvertToBitmap(texture, out var bitmap))
+		{
+			return false;
+		}
+
+		using MemoryStream stream = new();
+		bitmap.SaveAsPng(stream);
+		image = ImageBuilder.From(stream.ToArray(), texture.Name.String);
+		return image is not null;
 	}
 
 	private static AffineTransform WorldTransform(ITerrain terrain)
