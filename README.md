@@ -69,6 +69,8 @@ dotnet run --project src\TldLevels.Exporter -c Release -- --levels all --skip-st
 --skip-stubs             skip levels smaller than 20 KB
 --force                  re-export levels whose GLB already exists
 --validate <bool>        inspect each GLB after writing   default: true
+--merge-overlays <bool>  merge prop-only design scenes into their art scene  default: true
+--no-merge-overlays      export each level file on its own
 --preview <bool>         render a top-down PNG            default: true
 --blender <exe>          Blender executable (auto-detected)
 --preview-script <path>  render script (auto-detected)
@@ -87,10 +89,20 @@ Every level is its own checkpoint:
 - a GLB is written as `<level>.glb.part` and only moved into place on success, so a kill never leaves a truncated `.glb`;
 - previews use `<level>.png.part.png` the same way;
 - `manifest.json` is rewritten after every completed level;
+- merged art GLBs are recognised from the manifest's `mergeVersion`/`includes`, so a resumed run does not rebuild them (and an old manifest triggers one re-export to repair prop-only outputs);
 - **Ctrl+C** finishes the current level, writes the manifest and exits with `130`; a second Ctrl+C aborts immediately;
 - re-running the same command skips everything already done, so it resumes where it stopped.
 
 `--batch-size 10` is a good balance: it amortises AssetRipper's ~20 s shared-asset load over ten scenes. Measured on levels 2–11 it finished in **54 s** with a **1.1 GB** peak working set, while one level per batch costs ~27 s each.
+
+## Art scenes and design overlays
+
+Wintermute often stores an interior twice: the room shell in one level file
+(`level2`) and the loose props in the next (`level3`). Exported alone, the prop
+file looks like items floating in a void. Scenes whose largest mesh is under
+6 m across are therefore merged into the preceding art scene, and the resulting
+GLB keeps the art scene's name (the overlay is marked `merged` in the manifest).
+Use `--no-merge-overlays` to export every file separately.
 
 ## Notes
 
@@ -98,9 +110,12 @@ Every level is its own checkpoint:
   `resources.assets`) from the level file's own directory, so no staging copies
   are needed even though the source tree is read-only.
 - MonoBehaviours are not reconstructed (mixed/IL2CPP structure); meshes,
-  transforms, terrain and materials are unaffected.
+  transforms, materials and heightmap terrain are unaffected.
+- Unity Terrain landscapes are rebuilt from `TerrainData` because the stock GLB
+  scene exporter only walks `MeshFilter`s. The terrain is untextured (white).
 - Previews use Cycles CPU because Workbench/EEVEE crash headless without a GPU
-  context on this machine.
+  context on this machine. They are top-down, unlit, backface-culled, and skip
+  shadow casters, sky domes, light shafts/glow cards and ceiling shells.
 - Defaults use the VirtualBox shared-folder UNC paths, not drive letters: the
   guest has mapped the game share as both `Y:` and `Z:` at different times.
 - Alpha is inferred per texture (AssetRipper writes every material as `OPAQUE`);

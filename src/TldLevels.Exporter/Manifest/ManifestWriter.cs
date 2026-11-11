@@ -28,11 +28,13 @@ public static class ManifestWriter
 			startedUtc = startedUtc.UtcDateTime.ToString("O", CultureInfo.InvariantCulture),
 			completedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
 			assetRipper = "2.0.0",
+			mergeVersion = ManifestState.CurrentMergeVersion,
 			input = inputDirectory,
 			levels = results.Count,
 			exportedBytes = results.Sum(result => result.Bytes),
 			seconds = Math.Round(elapsed.TotalSeconds, 1),
 			succeeded = results.Count(result => result.Status is "ok" or "existing"),
+			merged = results.Count(result => result.Status == "merged"),
 			empty = results.Count(result => result.Status == "empty"),
 			failed = results.Count(result => result.Status == "failed"),
 			pending = results.Count(result => result.Status == "pending"),
@@ -60,6 +62,8 @@ public static class ManifestWriter
 			previewSeconds = Math.Round(result.PreviewSeconds, 1),
 			alphaMaterials = result.AlphaMaterials,
 			status = result.Status,
+			mergedInto = result.MergedInto,
+			includes = result.Includes,
 			error = result.Error,
 			warnings = result.Warnings,
 		}).ToArray();
@@ -86,7 +90,7 @@ public static class ManifestWriter
 	private static string BuildCsv(string outputDirectory, IReadOnlyList<LevelResult> results)
 	{
 		StringBuilder builder = new();
-		builder.AppendLine("id,scene,status,bytes,nodes,meshes,triangles,materials,textures,exportSeconds,previewSeconds,glb,preview,warnings");
+		builder.AppendLine("id,scene,status,bytes,nodes,meshes,triangles,materials,textures,exportSeconds,previewSeconds,glb,preview,mergedInto,includes,warnings");
 
 		foreach (LevelResult result in results)
 		{
@@ -103,6 +107,8 @@ public static class ManifestWriter
 			builder.Append(result.PreviewSeconds.ToString("0.0", CultureInfo.InvariantCulture)).Append(',');
 			builder.Append(Escape(Relative(outputDirectory, result.GlbPath) ?? string.Empty)).Append(',');
 			builder.Append(Escape(Relative(outputDirectory, result.PreviewPath) ?? string.Empty)).Append(',');
+			builder.Append(Escape(result.MergedInto ?? string.Empty)).Append(',');
+			builder.Append(Escape(string.Join("; ", result.Includes))).Append(',');
 			builder.Append(Escape(string.Join("; ", result.Warnings))).AppendLine();
 		}
 

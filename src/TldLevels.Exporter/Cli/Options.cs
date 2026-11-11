@@ -30,6 +30,9 @@ public sealed class Options
 
 	public bool Preview { get; set; } = true;
 
+	/// <summary>Merge design-overlay scenes into their preceding art scene.</summary>
+	public bool MergeOverlays { get; set; } = true;
+
 	public string? BlenderPath { get; set; }
 
 	public string? PreviewScript { get; set; }
@@ -87,6 +90,12 @@ public sealed class Options
 				case "--no-preview":
 					options.Preview = false;
 					break;
+				case "--merge-overlays":
+					options.MergeOverlays = RequireBool(args, ref i, arg);
+					break;
+				case "--no-merge-overlays":
+					options.MergeOverlays = false;
+					break;
 				case "--blender":
 					options.BlenderPath = RequireValue(args, ref i, arg);
 					break;
@@ -130,6 +139,8 @@ public sealed class Options
 		  --no-validate            Same as --validate false
 		  --preview <bool>         Render a top-down PNG           default: true
 		  --no-preview             Same as --preview false
+		  --merge-overlays <bool>  Merge prop-only design scenes into their art scene  default: true
+		  --no-merge-overlays      Export each level file on its own instead
 		  --blender <exe>          Blender executable (auto-detected when omitted)
 		  --preview-script <path>  Render script (auto-detected when omitted)
 		  --preview-size <px>      Preview resolution               default: 2048

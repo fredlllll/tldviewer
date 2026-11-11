@@ -11,6 +11,9 @@ preview/
 # Logs
 *.log
 
+# Python bytecode from Blender's --python runs
+__pycache__/
+
 # IDE / OS noise
 .vs/
 .idea/

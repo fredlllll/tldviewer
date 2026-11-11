@@ -152,7 +152,18 @@ Notes:
 
 - Use **one process per run**, with levels loaded in batches. `--batch-size 10` amortises shared-asset loading; memory grows with the batch. Measured on levels 2–11: 25.3 s to load 10 levels, then 0.7–5.8 s per scene, **54 s total**, peak working set **1.1 GB**. The runner falls back to one level at a time if a batch throws `OutOfMemoryException`.
 - MonoBehaviours are **not** reconstructed (Mixed structure → "Unknown" scripting backend). This is fine for meshes/transforms/materials; it does not affect `MeshFilter`, `MeshRenderer`, `Transform`, `Terrain` or static batching.
-- `GlbLevelBuilder` already handles Unity→glTF coordinate conversion, static batching (`SubsetIndices` / `StaticBatchInfo`), sub-meshes, prefab instances and Unity Terrain (`GlbTerrainBuilder`).
+- `GlbLevelBuilder` handles Unity→glTF coordinate conversion, static batching (`SubsetIndices` / `StaticBatchInfo`), sub-meshes and prefab instances. It does **not** emit scene `Terrain` components (it only walks `MeshFilter`s), so `SceneGlbExporter` rebuilds each referenced `TerrainData` heightmap with the same vertex layout as AssetRipper's `GlbTerrainBuilder` and attaches it at the terrain's world transform. Without this, level 1's ground was missing entirely.
+
+### 6.2.2 Art scenes and design overlays
+
+Wintermute splits many interiors into two serialized level files:
+
+- an **art scene** containing the room shell, furniture and terrain;
+- a **design scene** containing only loose props, usually in the *next* level file.
+
+Exported alone, a design scene looks like items floating in a void (levels 3, 5, 7, 11, 17, 21, 25, 31 in the shipped data). `SceneProfile` classifies a scene as an overlay when its largest world-space mesh extent is ≤ **6 m** (`OverlayMaxExtent`); walls, floors, vehicles and terrain are all larger. The runner then concatenates the art scene's assets with its overlay's into one GLB, keeps the art scene's file name, deletes the overlay's standalone `.glb`/`.png`, and records `status: "merged"` + `mergedInto` in the manifest. `--merge-overlays false` restores one file per level.
+
+Two pairs are deliberately **not** merged: 22 + 23 (a cinematic dam set with 9.8 m beams and a cloud backdrop) and 28 + 29 (29 already contains its own basement shell, 20.2 m extent).
 
 ### 6.2.1 Interruption and resume
 
@@ -228,6 +239,8 @@ TldLevels.Exporter [options]
   --force              overwrite existing GLBs      (default: false)
   --validate           inspect each GLB after write (default: true)
   --dry-run            list what would be exported
+  --merge-overlays     merge design scenes into their art scene (default: true)
+  --no-merge-overlays  export each level file on its own
   --preview            render a top-down PNG        (default: true)
   --blender <exe>      auto-detect if omitted
   --preview-size <px>  default: 2048
@@ -274,10 +287,12 @@ Preview acceptance: `level9.png` is 2048×2048, black background, geometry fully
 3. Orthographic camera at `(cx, cy, maxZ + 100)`, rotation `(0,0,0)`, `ortho_scale = max(extentX, extentY) × margin`.
 4. Black world background; `film_transparent = False`.
 5. Replace every material with `Emission` (image texture → Emission Color, strength 1) → true unlit, no shadows, no bounces.
-6. **Alpha inference:** AssetRipper writes every glTF material as `alphaMode` unset (`OPAQUE`) and never links `Alpha`, so there is no alpha signal to honour. Instead, sample each base-colour texture at 64×64 and take the fraction of texels with alpha < 0.5. Materials in the open range `0.005 … 0.995` get `Mix Shader(imageAlpha, Transparent BSDF, Emission)`. Materials outside it stay opaque — a nearly-clear texture is usually an RGB texture with an empty alpha channel, and hiding real geometry is worse than drawing one wrong decal.
-7. `CYCLES`, `device=CPU`, `samples=16`, `max_bounces=4`, `transparent_max_bounces=16`, `use_denoising=False`.
-8. `view_transform='Standard'`, `look='None'`, gamma 1.0 (avoid AgX/Filmic tone-mapping washing out the colours).
-9. Output `<level>.png` next to `<level>.glb`.
+6. **Backface culling:** wire `Geometry → Backfacing` into a `Mix Shader` (front → emission, back → transparent). Cycles ignores `material.use_backface_culling`; the glTF flag only affects EEVEE/Workbench. Interior walls are single-sided with normals facing into the room, so culling shows the floor instead of the ceiling.
+7. **Hidden geometry:** skip `*_Shadow` / `Shadow_Caster` proxies (invisible in game, white in an unlit pass), sky/cloud/horizon shells and any mesh wider than 5 km (backdrops would otherwise shrink the level to a dot), volumetric `LightShaft` / `GlowMesh` / light-pool cards (solid bright rectangles in game-space), and `*Ceiling*` shells (their top faces can point up, so culling alone does not remove them).
+8. **Alpha inference:** AssetRipper writes every glTF material as `alphaMode` unset (`OPAQUE`) and never links `Alpha`, so there is no alpha signal to honour. Instead, sample each base-colour texture at 64×64 and take the fraction of texels with alpha < 0.5. Materials in the open range `0.005 … 0.995` get `Mix Shader(imageAlpha, Transparent BSDF, Emission)`. Materials outside it stay opaque — a nearly-clear texture is usually an RGB texture with an empty alpha channel, and hiding real geometry is worse than drawing one wrong decal.
+9. `CYCLES`, `device=CPU`, `samples=16`, `max_bounces=4`, `transparent_max_bounces=16`, `use_denoising=False`.
+10. `view_transform='Standard'`, `look='None'`, gamma 1.0 (avoid AgX/Filmic tone-mapping washing out the colours).
+11. Output `<level>.png` next to `<level>.glb`.
 
 Over a black background, alpha blending and additive blending are equivalent (`emission × alpha` either way), so glow decals read correctly without a separate additive path.
 
@@ -289,6 +304,9 @@ Measured on `level9`: 7 of 32 materials take the alpha path (`CORPSE_*`, `FX_Tor
 - **Vertex colours are ignored** (emission uses only the base-colour texture).
 - Snow/white materials dominate the image; a top-down unlit map is inherently low-contrast for snowy interiors.
 - A tiny outlying object can expand the AABB and shrink the level in frame (seen in `level9`, top-right dot).
+- **Baked shell effects cannot be filtered.** Some levels bake snow patches, light cards or ceiling pieces into one combined shell mesh; the name-based filters only remove separately named objects, so a few bright quads can remain.
+- **Unity Terrain is untextured** (`TerrainDefault`, white) because splat maps are not reconstructed; heightmap geometry is complete.
+- A design/art merge is a heuristic. If a genuine standalone scene is ever smaller than 6 m across it will be folded into its predecessor; `--no-merge-overlays` is the escape hatch.
 
 ### 8.4 Planned options (post-v1)
 
