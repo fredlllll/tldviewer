@@ -36,6 +36,9 @@ public sealed class Options
 	/// <summary>Keep all Unity LOD levels instead of only the highest-detail LOD0.</summary>
 	public bool AllLods { get; set; }
 
+	/// <summary>Explicit design/base scene associations, expressed as overlayId=baseId.</summary>
+	public Dictionary<int, int> SceneMerges { get; } = [];
+
 	public string? BlenderPath { get; set; }
 
 	public string? PreviewScript { get; set; }
@@ -102,6 +105,9 @@ public sealed class Options
 				case "--all-lods":
 					options.AllLods = true;
 					break;
+				case "--merge-scene":
+					ParseSceneMerge(options, RequireValue(args, ref i, arg), arg);
+					break;
 				case "--blender":
 					options.BlenderPath = RequireValue(args, ref i, arg);
 					break;
@@ -148,6 +154,7 @@ public sealed class Options
 		  --merge-overlays <bool>  Merge prop-only design scenes into their art scene  default: true
 		  --no-merge-overlays      Export each level file on its own instead
 		  --all-lods               Keep LOD1/LOD2/etc. meshes (default: LOD0 only)
+		  --merge-scene <a=b>      Export scene a with base scene b (repeatable)
 		  --blender <exe>          Blender executable (auto-detected when omitted)
 		  --preview-script <path>  Render script (auto-detected when omitted)
 		  --preview-size <px>      Preview resolution               default: 2048
@@ -200,5 +207,19 @@ public sealed class Options
 			"false" or "0" or "no" or "off" => false,
 			_ => throw new ArgumentException($"Invalid boolean for {option}: '{text}'"),
 		};
+	}
+
+	private static void ParseSceneMerge(Options options, string text, string option)
+	{
+		int separator = text.IndexOf('=', StringComparison.Ordinal);
+		if (separator <= 0 || separator == text.Length - 1
+			|| !int.TryParse(text[..separator], NumberStyles.Integer, CultureInfo.InvariantCulture, out int overlay)
+			|| !int.TryParse(text[(separator + 1)..], NumberStyles.Integer, CultureInfo.InvariantCulture, out int baseLevel)
+			|| overlay < 0 || baseLevel < 0)
+		{
+			throw new ArgumentException($"Invalid scene merge for {option}; expected overlayId=baseId, got '{text}'");
+		}
+
+		options.SceneMerges[overlay] = baseLevel;
 	}
 }

@@ -151,6 +151,13 @@ public sealed class ExportRunner
 
 		AddNeighbour(batch.Min(level => level.Id) - 1);
 		AddNeighbour(batch.Max(level => level.Id) + 1);
+		foreach (LevelEntry level in batch)
+		{
+			if (_options.SceneMerges.TryGetValue(level.Id, out int baseId))
+			{
+				AddNeighbour(baseId);
+			}
+		}
 		loadLevels.Sort(static (a, b) => a.Id.CompareTo(b.Id));
 		return loadLevels;
 	}
@@ -235,8 +242,10 @@ public sealed class ExportRunner
 
 			if (_options.MergeOverlays
 				&& profiles.TryGetValue(level.SceneName, out SceneProfile? profile)
-				&& profile.IsOverlay
-				&& TryGetArtScene(level, scenes, profiles, out LevelEntry? art, out SceneHierarchyObject? artScene))
+				&& (profile.IsOverlay || _options.SceneMerges.ContainsKey(level.Id))
+				&& TryGetArtScene(level, scenes, profiles, out LevelEntry? art, out SceneHierarchyObject? artScene)
+				&& art is not null
+				&& artScene is not null)
 			{
 				ExportDesignVariant(level, art, artScene, scene, result, progress);
 			}
@@ -275,7 +284,8 @@ public sealed class ExportRunner
 	{
 		art = null;
 		artScene = null;
-		if (!_allById.TryGetValue(overlay.Id - 1, out LevelEntry? candidate)
+		int candidateId = _options.SceneMerges.GetValueOrDefault(overlay.Id, overlay.Id - 1);
+		if (!_allById.TryGetValue(candidateId, out LevelEntry? candidate)
 			|| !scenes.TryGetValue(candidate.SceneName, out SceneHierarchyObject? candidateScene)
 			|| !profiles.TryGetValue(candidate.SceneName, out SceneProfile? profile)
 			|| profile.IsOverlay

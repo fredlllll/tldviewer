@@ -71,6 +71,8 @@ dotnet run --project src\TldLevels.Exporter -c Release -- --levels all --skip-st
 --validate <bool>        inspect each GLB after writing   default: true
 --merge-overlays <bool>  add the preceding art scene to design-level exports  default: true
 --no-merge-overlays      export each level file on its own
+--all-lods                keep LOD1/LOD2/etc. meshes (default: LOD0 only)
+--merge-scene <a=b>       export scene a with base scene b (repeatable)
 --preview <bool>         render a top-down PNG            default: true
 --blender <exe>          Blender executable (auto-detected)
 --preview-script <path>  render script (auto-detected)
@@ -106,6 +108,12 @@ variant keeps the design level's name (for example `level10.glb` is the base and
 `level11.glb` is base 10 plus design 11). Multiple design scenes each receive
 their own independent variant.
 Use `--no-merge-overlays` to export every file separately.
+
+For non-consecutive campaign content, use an explicit association such as
+`--merge-scene 120=118`. This writes `level120.glb` as a copy of level118 plus
+level120's content while leaving `level118.glb` unchanged. The base scene is
+loaded as context automatically even when it is not adjacent to the requested
+scene.
 
 ## Notes
 
