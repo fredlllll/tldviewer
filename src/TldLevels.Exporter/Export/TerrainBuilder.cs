@@ -44,6 +44,12 @@ public static class TerrainBuilder
 
 			ITerrainData? data = terrain.TerrainDataP;
 			string terrainName = terrain.GameObject_C2P?.Name.String ?? "<unnamed>";
+			if (IsAuxiliaryWaterTerrain(terrainName))
+			{
+				Console.WriteLine($"[terrain] {terrainName}: skipped auxiliary water terrain for visualization");
+				continue;
+			}
+
 			if (data is null)
 			{
 				Console.WriteLine($"[terrain] {terrainName}: no TerrainData");
@@ -74,6 +80,15 @@ public static class TerrainBuilder
 
 		return added;
 	}
+
+	private static bool IsAuxiliaryWaterTerrain(string name) =>
+		name.Contains("water", StringComparison.OrdinalIgnoreCase)
+		|| name.Contains("river", StringComparison.OrdinalIgnoreCase)
+		|| name.Contains("lake", StringComparison.OrdinalIgnoreCase)
+		|| name.Contains("pond", StringComparison.OrdinalIgnoreCase)
+		|| name.Contains("marsh", StringComparison.OrdinalIgnoreCase)
+		|| name.Contains("creek", StringComparison.OrdinalIgnoreCase)
+		|| name.Contains("ice", StringComparison.OrdinalIgnoreCase);
 
 	private static bool TryAdd(SceneBuilder sceneBuilder, ITerrain terrain, ITerrainData data)
 	{

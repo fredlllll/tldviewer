@@ -382,7 +382,7 @@ public sealed class ExportRunner
 
 		try
 		{
-			bool success = SceneGlbExporter.Export(assets, tempPath, LocalFileSystem.Instance, out int terrainCount);
+			bool success = SceneGlbExporter.Export(assets, tempPath, LocalFileSystem.Instance, _options.AllLods, out int terrainCount);
 			if (terrainCount > 0)
 			{
 				Console.WriteLine($"[{level.SceneName}] added {terrainCount} terrain mesh(es)");

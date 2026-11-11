@@ -15,9 +15,11 @@ public static class SceneGlbExporter
 		IEnumerable<IUnityObjectBase> assets,
 		string path,
 		FileSystem fileSystem,
+		bool allLods,
 		out int terrainCount)
 	{
 		List<IUnityObjectBase> assetList = [.. assets];
+		GlbLevelBuilder.IncludeAllLods = allLods;
 		SceneBuilder sceneBuilder = GlbLevelBuilder.Build(assetList, isScene: true);
 		terrainCount = TerrainBuilder.AddTerrains(sceneBuilder, assetList);
 

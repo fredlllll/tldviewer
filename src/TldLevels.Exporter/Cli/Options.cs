@@ -33,6 +33,9 @@ public sealed class Options
 	/// <summary>Merge design-overlay scenes into their preceding art scene.</summary>
 	public bool MergeOverlays { get; set; } = true;
 
+	/// <summary>Keep all Unity LOD levels instead of only the highest-detail LOD0.</summary>
+	public bool AllLods { get; set; }
+
 	public string? BlenderPath { get; set; }
 
 	public string? PreviewScript { get; set; }
@@ -96,6 +99,9 @@ public sealed class Options
 				case "--no-merge-overlays":
 					options.MergeOverlays = false;
 					break;
+				case "--all-lods":
+					options.AllLods = true;
+					break;
 				case "--blender":
 					options.BlenderPath = RequireValue(args, ref i, arg);
 					break;
@@ -141,6 +147,7 @@ public sealed class Options
 		  --no-preview             Same as --preview false
 		  --merge-overlays <bool>  Merge prop-only design scenes into their art scene  default: true
 		  --no-merge-overlays      Export each level file on its own instead
+		  --all-lods               Keep LOD1/LOD2/etc. meshes (default: LOD0 only)
 		  --blender <exe>          Blender executable (auto-detected when omitted)
 		  --preview-script <path>  Render script (auto-detected when omitted)
 		  --preview-size <px>      Preview resolution               default: 2048
