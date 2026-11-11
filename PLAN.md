@@ -161,9 +161,9 @@ Wintermute splits many interiors into two serialized level files:
 - an **art scene** containing the room shell, furniture and terrain;
 - a **design scene** containing only loose props, usually in the *next* level file.
 
-Exported alone, a design scene looks like items floating in a void (levels 3, 5, 7, 11, 17, 21, 25, 31 in the shipped data). `SceneProfile` classifies a scene as an overlay when its largest world-space mesh extent is ≤ **15 m** (`OverlayMaxExtent`); walls, floors, vehicles and terrain are all larger. The runner then concatenates the art scene's assets with its overlay's into one GLB, keeps the art scene's file name, deletes the overlay's standalone `.glb`/`.png`, and records `status: "merged"` + `mergedInto` in the manifest. `--merge-overlays false` restores one file per level.
+Exported alone, a design scene looks like items floating in a void (levels 3, 5, 7, 11, 17, 21, 25, 31 in the shipped data). `SceneProfile` classifies a scene as an overlay when its largest world-space mesh extent is ≤ **15 m** (`OverlayMaxExtent`); walls, floors, vehicles and terrain are all larger. The runner keeps the art scene's base GLB and exports each design scene under its own name as a variant containing a copy of the art assets plus that design scene's assets. For example, `level10.glb` is the base and `level11.glb` is base 10 plus design 11. Multiple designs therefore produce multiple independent variants. `--merge-overlays false` restores one file per level without the base copy.
 
-Two pairs are deliberately **not** merged: 22 + 23 (a cinematic dam set with 9.8 m beams and a cloud backdrop) and 28 + 29 (29 already contains its own basement shell, 20.2 m extent).
+Two pairs are deliberately treated as standalone art scenes: 22 + 23 (a cinematic dam set with 9.8 m beams and a cloud backdrop) and 28 + 29 (29 already contains its own basement shell, 20.2 m extent).
 
 ### 6.2.1 Interruption and resume
 
@@ -239,7 +239,7 @@ TldLevels.Exporter [options]
   --force              overwrite existing GLBs      (default: false)
   --validate           inspect each GLB after write (default: true)
   --dry-run            list what would be exported
-  --merge-overlays     merge design scenes into their art scene (default: true)
+  --merge-overlays     add the preceding art scene to design-level exports (default: true)
   --no-merge-overlays  export each level file on its own
   --preview            render a top-down PNG        (default: true)
   --blender <exe>      auto-detect if omitted

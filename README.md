@@ -69,7 +69,7 @@ dotnet run --project src\TldLevels.Exporter -c Release -- --levels all --skip-st
 --skip-stubs             skip levels smaller than 20 KB
 --force                  re-export levels whose GLB already exists
 --validate <bool>        inspect each GLB after writing   default: true
---merge-overlays <bool>  merge prop-only design scenes into their art scene  default: true
+--merge-overlays <bool>  add the preceding art scene to design-level exports  default: true
 --no-merge-overlays      export each level file on its own
 --preview <bool>         render a top-down PNG            default: true
 --blender <exe>          Blender executable (auto-detected)
@@ -89,7 +89,7 @@ Every level is its own checkpoint:
 - a GLB is written as `<level>.glb.part` and only moved into place on success, so a kill never leaves a truncated `.glb`;
 - previews use `<level>.png.part.png` the same way;
 - `manifest.json` is rewritten after every completed level;
-- merged art GLBs are recognised from the manifest's `mergeVersion`/`includes`, so a resumed run does not rebuild them (and an old manifest triggers one re-export to repair prop-only outputs);
+- design variants are recognised from the manifest's `mergeVersion`/`includes`, so a resumed run does not rebuild them (and an old manifest triggers one re-export to repair the previous merge direction);
 - **Ctrl+C** finishes the current level, writes the manifest and exits with `130`; a second Ctrl+C aborts immediately;
 - re-running the same command skips everything already done, so it resumes where it stopped.
 
@@ -100,8 +100,11 @@ Every level is its own checkpoint:
 Wintermute often stores an interior twice: the room shell in one level file
 (`level2`) and the loose props in the next (`level3`). Exported alone, the prop
 file looks like items floating in a void. Scenes whose largest mesh is under
-15 m across are therefore merged into the preceding art scene, and the resulting
-GLB keeps the art scene's name (the overlay is marked `merged` in the manifest).
+15 m across are therefore exported as variants containing a copy of the
+preceding art scene plus the design props. The base keeps its own GLB, and the
+variant keeps the design level's name (for example `level10.glb` is the base and
+`level11.glb` is base 10 plus design 11). Multiple design scenes each receive
+their own independent variant.
 Use `--no-merge-overlays` to export every file separately.
 
 ## Notes

@@ -213,9 +213,6 @@ public sealed class ExportRunner
 				(profile.IsOverlay ? " (design overlay)" : string.Empty));
 		}
 
-		Dictionary<string, List<LevelEntry>> overlaysByArt = BuildOverlayMap(loadLevels, scenes, profiles);
-		HashSet<string> handled = new(StringComparer.OrdinalIgnoreCase);
-
 		foreach (LevelEntry level in loadLevels)
 		{
 			if (progress.Cancelled)
@@ -231,51 +228,22 @@ public sealed class ExportRunner
 			bool requested = batch.Any(candidate => candidate.Id == level.Id);
 			LevelResult? result = bySource.GetValueOrDefault(level.SourcePath);
 
-			if (overlaysByArt.TryGetValue(level.SceneName, out List<LevelEntry>? overlays))
-			{
-				handled.Add(level.SceneName);
-				bool exported = ExportCombined(level, scene, overlays, scenes, result, progress);
-
-				foreach (LevelEntry overlay in overlays)
-				{
-					handled.Add(overlay.SceneName);
-					LevelResult? overlayResult = bySource.GetValueOrDefault(overlay.SourcePath);
-					if (!exported)
-					{
-						if (overlayResult is not null)
-						{
-							overlayResult.Status = "failed";
-							overlayResult.Error = $"Could not export art scene {level.SceneName}";
-							Console.WriteLine($"[{overlay.SceneName}] FAILED: art scene {level.SceneName} did not export");
-							progress.Report();
-						}
-
-						continue;
-					}
-
-					DeleteOverlayArtifacts(overlay);
-					if (overlayResult is not null)
-					{
-						overlayResult.Status = "merged";
-						overlayResult.MergedInto = level.SceneName;
-						overlayResult.GlbPath = GlbPath(level);
-						overlayResult.PreviewPath = Path.ChangeExtension(GlbPath(level), ".png");
-						overlayResult.Bytes = 0;
-						overlayResult.Warnings.Add($"Design overlay merged into {level.SceneName}");
-						Console.WriteLine($"[{overlay.SceneName}] merged into {level.SceneName}");
-						progress.Report();
-					}
-				}
-
-				continue;
-			}
-
-			if (handled.Contains(level.SceneName) || !requested)
+			if (!requested)
 			{
 				continue;
 			}
 
-			ExportSingle(level, scene.Assets, result, progress);
+			if (_options.MergeOverlays
+				&& profiles.TryGetValue(level.SceneName, out SceneProfile? profile)
+				&& profile.IsOverlay
+				&& TryGetArtScene(level, scenes, profiles, out LevelEntry? art, out SceneHierarchyObject? artScene))
+			{
+				ExportDesignVariant(level, art, artScene, scene, result, progress);
+			}
+			else
+			{
+				ExportSingle(level, scene.Assets, result, progress);
+			}
 		}
 
 		foreach (LevelEntry level in batch)
@@ -298,43 +266,27 @@ public sealed class ExportRunner
 		}
 	}
 
-	private Dictionary<string, List<LevelEntry>> BuildOverlayMap(
-		List<LevelEntry> loadLevels,
+	private bool TryGetArtScene(
+		LevelEntry overlay,
 		IReadOnlyDictionary<string, SceneHierarchyObject> scenes,
-		IReadOnlyDictionary<string, SceneProfile> profiles)
+		IReadOnlyDictionary<string, SceneProfile> profiles,
+		out LevelEntry? art,
+		out SceneHierarchyObject? artScene)
 	{
-		Dictionary<string, List<LevelEntry>> overlaysByArt = new(StringComparer.OrdinalIgnoreCase);
-		if (!_options.MergeOverlays)
+		art = null;
+		artScene = null;
+		if (!_allById.TryGetValue(overlay.Id - 1, out LevelEntry? candidate)
+			|| !scenes.TryGetValue(candidate.SceneName, out SceneHierarchyObject? candidateScene)
+			|| !profiles.TryGetValue(candidate.SceneName, out SceneProfile? profile)
+			|| profile.IsOverlay
+			|| profile.MeshCount == 0)
 		{
-			return overlaysByArt;
+			return false;
 		}
 
-		foreach (LevelEntry level in loadLevels)
-		{
-			if (!profiles.TryGetValue(level.SceneName, out SceneProfile? profile) || !profile.IsOverlay)
-			{
-				continue;
-			}
-
-			if (!_allById.TryGetValue(level.Id - 1, out LevelEntry? art)
-				|| !scenes.ContainsKey(art.SceneName)
-				|| !profiles.TryGetValue(art.SceneName, out SceneProfile? artProfile)
-				|| artProfile.IsOverlay
-				|| artProfile.MeshCount == 0)
-			{
-				continue;
-			}
-
-			if (!overlaysByArt.TryGetValue(art.SceneName, out List<LevelEntry>? list))
-			{
-				list = [];
-				overlaysByArt.Add(art.SceneName, list);
-			}
-
-			list.Add(level);
-		}
-
-		return overlaysByArt;
+		art = candidate;
+		artScene = candidateScene;
+		return true;
 	}
 
 	private void ExportSingle(
@@ -345,7 +297,7 @@ public sealed class ExportRunner
 	{
 		string glbPath = GlbPath(level);
 
-		if (!_options.Force && File.Exists(glbPath))
+		if (!_options.Force && _previousManifest.IsComplete(level.SceneName, [], glbPath))
 		{
 			if (_options.Validate && result is not null && !TryInspect(result))
 			{
@@ -371,21 +323,21 @@ public sealed class ExportRunner
 		ExportAssets(level, assets, result, progress, [], forcePreview: true);
 	}
 
-	/// <summary>Exports an art scene together with its design overlays.</summary>
-	private bool ExportCombined(
+	/// <summary>Exports a design level as a copy of its preceding art scene plus its own props.</summary>
+	private bool ExportDesignVariant(
+		LevelEntry overlay,
 		LevelEntry art,
 		SceneHierarchyObject artScene,
-		IReadOnlyList<LevelEntry> overlays,
-		IReadOnlyDictionary<string, SceneHierarchyObject> scenes,
+		SceneHierarchyObject overlayScene,
 		LevelResult? result,
 		Progress progress)
 	{
-		string glbPath = GlbPath(art);
+		string glbPath = GlbPath(overlay);
 		string pngPath = Path.ChangeExtension(glbPath, ".png");
-		string[] overlayNames = [.. overlays.Select(overlay => overlay.SceneName)];
+		string[] includes = [art.SceneName];
 
 		if (!_options.Force
-			&& _previousManifest.IsComplete(art.SceneName, overlayNames, glbPath))
+			&& _previousManifest.IsComplete(overlay.SceneName, includes, glbPath))
 		{
 			if (result is not null)
 			{
@@ -394,12 +346,12 @@ public sealed class ExportRunner
 				result.Bytes = new FileInfo(glbPath).Length;
 				result.PreviewPath = pngPath;
 				result.Includes.Clear();
-				result.Includes.AddRange(overlayNames);
+				result.Includes.AddRange(includes);
 				TryInspect(result);
 				Console.WriteLine(
-					$"[{art.SceneName}] exists  {Megabytes(result.Bytes):F1} MB " +
-					$"(includes {string.Join(", ", overlayNames)})");
-				RenderPreview(art, glbPath, result, force: false);
+					$"[{overlay.SceneName}] exists  {Megabytes(result.Bytes):F1} MB " +
+					$"(base {art.SceneName})");
+				RenderPreview(overlay, glbPath, result, force: false);
 				progress.Report();
 			}
 
@@ -409,16 +361,11 @@ public sealed class ExportRunner
 		if (result is not null)
 		{
 			result.Includes.Clear();
-			result.Includes.AddRange(overlayNames);
+			result.Includes.AddRange(includes);
 		}
 
-		IEnumerable<IUnityObjectBase> assets = artScene.Assets;
-		foreach (LevelEntry overlay in overlays)
-		{
-			assets = assets.Concat(scenes[overlay.SceneName].Assets);
-		}
-
-		return ExportAssets(art, assets, result, progress, overlayNames, forcePreview: true);
+		IEnumerable<IUnityObjectBase> assets = artScene.Assets.Concat(overlayScene.Assets);
+		return ExportAssets(overlay, assets, result, progress, includes, forcePreview: true);
 	}
 
 	private bool ExportAssets(
@@ -598,16 +545,6 @@ public sealed class ExportRunner
 			result.Warnings.Add($"Inspection failed: {exception.Message}");
 			return false;
 		}
-	}
-
-	private void DeleteOverlayArtifacts(LevelEntry overlay)
-	{
-		string glbPath = GlbPath(overlay);
-		string pngPath = Path.ChangeExtension(glbPath, ".png");
-		DeleteQuietly(glbPath);
-		DeleteQuietly(pngPath);
-		DeleteQuietly(glbPath + ".part");
-		DeleteQuietly(pngPath + ".part.png");
 	}
 
 	private string GlbPath(LevelEntry level) =>

@@ -14,7 +14,7 @@ namespace TldLevels.Exporter.Manifest;
 /// </summary>
 public sealed class ManifestState
 {
-	public const int CurrentMergeVersion = 1;
+	public const int CurrentMergeVersion = 2;
 
 	private readonly Dictionary<string, Entry> _entries;
 
