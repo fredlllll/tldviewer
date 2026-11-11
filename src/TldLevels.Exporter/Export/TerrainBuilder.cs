@@ -118,7 +118,11 @@ public static class TerrainBuilder
 			for (int x = 0; x < w; x++)
 			{
 				float elevation = (float)heights[x + y * width] / short.MaxValue;
-				Vector3 position = new Vector3(-y, elevation, x) * meshScale;
+				// Unity terrain data uses x across the first dimension and z across
+				// the second. Do not swap those axes: the X handedness conversion is
+				// already carried by meshScale, and swapping them rotates the whole
+				// landscape by 90 degrees relative to scene objects.
+				Vector3 position = new Vector3(x, elevation, y) * meshScale;
 				Vector2 uv = new Vector2(x, y) * uvScale;
 				vertices[y * w + x] = new(new VertexPosition(position), new VertexTexture1(uv));
 			}
