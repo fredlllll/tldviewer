@@ -4,6 +4,8 @@ using AssetRipper.IO.Files;
 using SharpGLTF.Schema2;
 using SharpGLTF.Scenes;
 using System.Numerics;
+using System.Text;
+using System.Text.Json.Nodes;
 
 namespace TldLevels.Exporter.Export;
 
@@ -46,6 +48,7 @@ public static class SceneGlbExporter
 	{
 		ModelRoot model = ModelRoot.Load(path);
 		Dictionary<string, Node> last = new(StringComparer.Ordinal);
+		HashSet<int> removedNodeIndices = [];
 		int removed = 0;
 
 		foreach (Node node in model.LogicalNodes)
@@ -59,7 +62,7 @@ public static class SceneGlbExporter
 			string key = $"{node.Name}\0{MathF.Round(position.X, 1)}\0{MathF.Round(position.Y, 1)}\0{MathF.Round(position.Z, 1)}";
 			if (last.TryGetValue(key, out Node? previous))
 			{
-				previous.Mesh = null;
+				removedNodeIndices.Add(previous.LogicalIndex);
 				removed++;
 			}
 
@@ -68,8 +71,56 @@ public static class SceneGlbExporter
 
 		if (removed > 0)
 		{
-			model.SaveGLB(path);
+			RewriteGlbWithoutMeshes(path, removedNodeIndices);
 			Console.WriteLine($"[dedup] removed {removed} overlapping mesh placement(s), kept later instances");
 		}
+	}
+
+	private static void RewriteGlbWithoutMeshes(string path, IReadOnlySet<int> nodeIndices)
+	{
+		string tempPath = path + ".dedup.part";
+		using FileStream input = File.OpenRead(path);
+		using BinaryReader reader = new(input, Encoding.UTF8, leaveOpen: true);
+		uint magic = reader.ReadUInt32();
+		uint version = reader.ReadUInt32();
+		uint length = reader.ReadUInt32();
+		uint jsonLength = reader.ReadUInt32();
+		uint jsonType = reader.ReadUInt32();
+		if (magic != 0x46546C67 || version != 2 || jsonType != 0x4E4F534A)
+		{
+			throw new InvalidDataException("Invalid GLB while applying duplicate filter");
+		}
+
+		JsonObject root = JsonNode.Parse(reader.ReadBytes(checked((int)jsonLength)))?.AsObject()
+			?? throw new InvalidDataException("GLB JSON chunk is invalid");
+		JsonArray nodes = root["nodes"]?.AsArray()
+			?? throw new InvalidDataException("GLB has no nodes array");
+		foreach (int index in nodeIndices)
+		{
+			if (index >= 0 && index < nodes.Count)
+			{
+				nodes[index]?.AsObject().Remove("mesh");
+			}
+		}
+
+		byte[] json = Encoding.UTF8.GetBytes(root.ToJsonString());
+		int paddedLength = (json.Length + 3) & ~3;
+		Array.Resize(ref json, paddedLength);
+		for (int i = json.Length - 1; i >= json.Length - (paddedLength - json.Length); i--)
+		{
+			json[i] = 0x20;
+		}
+
+		using FileStream output = File.Create(tempPath);
+		using BinaryWriter writer = new(output, Encoding.UTF8, leaveOpen: true);
+		writer.Write(magic);
+		writer.Write(version);
+		writer.Write(length + (uint)(json.Length - jsonLength));
+		writer.Write((uint)json.Length);
+		writer.Write(jsonType);
+		writer.Write(json);
+		input.CopyTo(output);
+		output.Flush();
+		File.Move(tempPath, path, overwrite: true);
 	}
 }
