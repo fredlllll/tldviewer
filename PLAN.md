@@ -161,7 +161,7 @@ Wintermute splits many interiors into two serialized level files:
 - an **art scene** containing the room shell, furniture and terrain;
 - a **design scene** containing only loose props, usually in the *next* level file.
 
-Exported alone, a design scene looks like items floating in a void (levels 3, 5, 7, 11, 17, 21, 25, 31 in the shipped data). `SceneProfile` classifies a scene as an overlay when its largest world-space mesh extent is ≤ **6 m** (`OverlayMaxExtent`); walls, floors, vehicles and terrain are all larger. The runner then concatenates the art scene's assets with its overlay's into one GLB, keeps the art scene's file name, deletes the overlay's standalone `.glb`/`.png`, and records `status: "merged"` + `mergedInto` in the manifest. `--merge-overlays false` restores one file per level.
+Exported alone, a design scene looks like items floating in a void (levels 3, 5, 7, 11, 17, 21, 25, 31 in the shipped data). `SceneProfile` classifies a scene as an overlay when its largest world-space mesh extent is ≤ **15 m** (`OverlayMaxExtent`); walls, floors, vehicles and terrain are all larger. The runner then concatenates the art scene's assets with its overlay's into one GLB, keeps the art scene's file name, deletes the overlay's standalone `.glb`/`.png`, and records `status: "merged"` + `mergedInto` in the manifest. `--merge-overlays false` restores one file per level.
 
 Two pairs are deliberately **not** merged: 22 + 23 (a cinematic dam set with 9.8 m beams and a cloud backdrop) and 28 + 29 (29 already contains its own basement shell, 20.2 m extent).
 
@@ -306,7 +306,7 @@ Measured on `level9`: 7 of 32 materials take the alpha path (`CORPSE_*`, `FX_Tor
 - A tiny outlying object can expand the AABB and shrink the level in frame (seen in `level9`, top-right dot).
 - **Baked shell effects cannot be filtered.** Some levels bake snow patches, light cards or ceiling pieces into one combined shell mesh; the name-based filters only remove separately named objects, so a few bright quads can remain.
 - **Unity Terrain is untextured** (`TerrainDefault`, white) because splat maps are not reconstructed; heightmap geometry is complete.
-- A design/art merge is a heuristic. If a genuine standalone scene is ever smaller than 6 m across it will be folded into its predecessor; `--no-merge-overlays` is the escape hatch.
+- A design/art merge is a heuristic. If a genuine standalone scene is ever smaller than 15 m across it will be folded into its predecessor; `--no-merge-overlays` is the escape hatch.
 
 ### 8.4 Planned options (post-v1)
 

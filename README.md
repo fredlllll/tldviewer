@@ -100,7 +100,7 @@ Every level is its own checkpoint:
 Wintermute often stores an interior twice: the room shell in one level file
 (`level2`) and the loose props in the next (`level3`). Exported alone, the prop
 file looks like items floating in a void. Scenes whose largest mesh is under
-6 m across are therefore merged into the preceding art scene, and the resulting
+15 m across are therefore merged into the preceding art scene, and the resulting
 GLB keeps the art scene's name (the overlay is marked `merged` in the manifest).
 Use `--no-merge-overlays` to export every file separately.
 

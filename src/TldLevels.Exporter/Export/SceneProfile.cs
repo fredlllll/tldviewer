@@ -26,11 +26,14 @@ public sealed record SceneProfile(
 	bool IsOverlay)
 {
 	/// <summary>
-	/// Props are smaller than this; walls, floors, terrain and vehicles are
-	/// larger. Level 23 (a cinematic dam set with 9.8 m beams) and level 29
-	/// (a complete basement variant) must stay above it.
+	/// Loose props and story items are smaller than this; room shells, terrain
+	/// and vehicles are larger. Measured maximum horizontal extents:
+	/// overlays 0.1-12.6 m (3, 5, 7, 11, 13, 17, 21, 25, 31); real scenes
+	/// 20.2 m and up (29 basement, 23 cinematic dam, 28 basement variant).
+	/// The threshold sits in that gap so a long cable or beam does not stop a
+	/// design scene from merging.
 	/// </summary>
-	public const float OverlayMaxExtent = 6.0f;
+	public const float OverlayMaxExtent = 15.0f;
 
 	public static SceneProfile Analyze(SceneHierarchyObject scene)
 	{

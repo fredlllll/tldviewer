@@ -208,12 +208,9 @@ public sealed class ExportRunner
 		{
 			SceneProfile profile = SceneProfile.Analyze(scene);
 			profiles[name] = profile;
-			if (profile.IsOverlay)
-			{
-				Console.WriteLine(
-					$"[scene] {name} looks like a design overlay " +
-					$"({profile.MeshCount} meshes, max {profile.MaxHorizontalExtent:F1} m)");
-			}
+			Console.WriteLine(
+				$"[scene] {name}: {profile.MeshCount} meshes, max {profile.MaxHorizontalExtent:F1} m" +
+				(profile.IsOverlay ? " (design overlay)" : string.Empty));
 		}
 
 		Dictionary<string, List<LevelEntry>> overlaysByArt = BuildOverlayMap(loadLevels, scenes, profiles);
