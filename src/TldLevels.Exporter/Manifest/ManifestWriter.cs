@@ -18,7 +18,8 @@ public static class ManifestWriter
 		string inputDirectory,
 		DateTimeOffset startedUtc,
 		TimeSpan elapsed,
-		IReadOnlyList<LevelResult> results)
+		IReadOnlyList<LevelResult> results,
+		bool cancelled = false)
 	{
 		Directory.CreateDirectory(outputDirectory);
 
@@ -34,6 +35,8 @@ public static class ManifestWriter
 			succeeded = results.Count(result => result.Status is "ok" or "existing"),
 			empty = results.Count(result => result.Status == "empty"),
 			failed = results.Count(result => result.Status == "failed"),
+			pending = results.Count(result => result.Status == "pending"),
+			cancelled,
 		};
 
 		object[] levels = results.Select(result => new

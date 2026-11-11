@@ -16,12 +16,14 @@ Extract every Wintermute level from the installed game and write one **`.glb` (b
 | Game version | 2.60 (Steam, Windows) |
 | Unity version | **6000.0.60f1** (Unity 6 LTS) |
 | Scripting backend | **IL2CPP** (`GameAssembly.dll` + `il2cpp_data/Metadata/global-metadata.dat`) |
-| Base data | `Z:\tld_Data` (only `level0` / menu scene) |
-| Campaign data | `Z:\tld_dlc\wintermute\tld_Data` — **250 level files** (`level0`…`level249`) |
+| Base data | `\\VBoxSvr\TheLongDark\tld_Data` (only `level0` / menu scene) |
+| Campaign data | `\\VBoxSvr\TheLongDark\tld_dlc\wintermute\tld_Data` — **250 level files** (`level0`…`level249`) |
 | Level files | 1.89 GB (`levelN` + `levelN.resS`) |
 | Whole campaign data | 9.58 GB |
-| Stub levels | 84 files < 20 KB, 105 < 100 KB → ~145 meaningful levels |
-| Free disk (C:) | 406 GB |
+| Stub levels | 83 files < 20 KB → **166 meaningful levels** |
+| Output volume | `\\VBoxSvr\TLDLevels`, 110 GB free |
+| Free disk (C:) | 404 GB |
+| RAM / CPU | 23.1 GB / Ryzen 5 3600XT (6 cores) |
 | SDK | .NET SDK 10.0.401 |
 
 AssetRipper 2.0.0 declares support for Unity `3.5.0` → `6000.4.X`, so this build is in range. Tag `2.0.0` = commit `1ac666f47d8e9dedf96afb0b914c70d7656151ea`.
@@ -32,11 +34,11 @@ AssetRipper 2.0.0 declares support for Unity `3.5.0` → `6000.4.X`, so this bui
 2. **v1 content**: geometry + approximated materials (base colour + normal where resolvable). Custom TLD shaders become simple glTF PBR.
 3. **Binary `.glb`** output. `.gltf` + external buffer only as a fallback for scenes that exceed glTF's 2 GB buffer limit.
 4. **Automatic previews** with Blender: top-down orthographic, unlit, black background, alpha-aware materials, one PNG per level.
-5. **Output lives outside the repository**: GLBs, PNGs and manifests default to `Y:\tldlevels\levels`; the repo holds code only. `--output` overrides it.
+5. **Output lives outside the repository**, on the `TLDLevels` VirtualBox share (`\\VBoxSvr\TLDLevels\tldlevels\levels`). The repo holds code only. `--output` overrides it. Defaults use UNC paths because the guest's drive letters proved unstable.
 
 ## 4. Why this works (validated on `level9`)
 
-- AssetRipper accepts a **single serialized file** (e.g. `Z:\tld_dlc\wintermute\tld_Data\level9`).
+- AssetRipper accepts a **single serialized file** (e.g. `\\VBoxSvr\TheLongDark\tld_dlc\wintermute\tld_Data\level9`).
 - It detects a *Mixed* structure and resolves `level9.resS`, `sharedassets9`, `sharedassets2/8`, `sharedassets0`, `resources.assets` **from the level file's own directory**. No staging/copying required.
 - Dependencies load on demand, so only one level is in memory at a time.
 - Export call used:
@@ -95,7 +97,7 @@ C:\Projects\tldlevels\               repo: code only
 └─ tools/
    └─ blender/render_topdown.py     # runs inside Blender
 
-Y:\tldlevels\levels\                generated, outside the repo
+\\VBoxSvr\TLDLevels\tldlevels\levels\      generated, outside the repo
 ├─ levelN.glb
 ├─ levelN.png
 ├─ manifest.json
@@ -103,7 +105,7 @@ Y:\tldlevels\levels\                generated, outside the repo
 └─ export.log
 ```
 
-Generated artefacts never enter the repository: `--output` defaults to `Y:\tldlevels\levels`, and `output/` + `preview/` are gitignored for anyone who points it back into the tree.
+Generated artefacts never enter the repository: `--output` defaults to `\\VBoxSvr\TLDLevels\tldlevels\levels`, and `output/` + `preview/` are gitignored for anyone who points it back into the tree.
 
 `nuget.config` is required because the AssetRipper projects use its own feed (`nuget.samboy.dev`); without it, restore from our solution directory may fail.
 
@@ -148,9 +150,26 @@ foreach (var scene in data.GameBundle.FetchAssets().OfType<SceneHierarchyObject>
 
 Notes:
 
-- Use **one process per batch** (AssetRipper is not designed for concurrent in-process loads). `--batch-size 8` amortises shared-asset loading; memory grows with the batch.
+- Use **one process per run**, with levels loaded in batches. `--batch-size 10` amortises shared-asset loading; memory grows with the batch. Measured on levels 2–11: 25.3 s to load 10 levels, then 0.7–5.8 s per scene, **54 s total**, peak working set **1.1 GB**. The runner falls back to one level at a time if a batch throws `OutOfMemoryException`.
 - MonoBehaviours are **not** reconstructed (Mixed structure → "Unknown" scripting backend). This is fine for meshes/transforms/materials; it does not affect `MeshFilter`, `MeshRenderer`, `Transform`, `Terrain` or static batching.
 - `GlbLevelBuilder` already handles Unity→glTF coordinate conversion, static batching (`SubsetIndices` / `StaticBatchInfo`), sub-meshes, prefab instances and Unity Terrain (`GlbTerrainBuilder`).
+
+### 6.2.1 Interruption and resume
+
+Every level is a checkpoint:
+
+- the GLB is written to `<level>.glb.part` and moved into place only on success;
+- the preview is rendered to `<level>.png.part.png` and moved the same way;
+- `manifest.json` is rewritten after each completed level;
+- Ctrl+C finishes the current level, writes the manifest and exits with code `130`; a second Ctrl+C aborts immediately;
+- the next run skips levels whose GLB exists **and** inspects cleanly, so re-running the same command resumes where it stopped. A truncated GLB from a hard kill fails inspection and is re-exported automatically.
+
+Drive letters on the guest are unstable (`Y:`/`Z:` swapped between sessions once), so the tool defaults to the VirtualBox share UNC paths instead:
+
+```
+input   \\VBoxSvr\TheLongDark\tld_dlc\wintermute\tld_Data
+output  \\VBoxSvr\TLDLevels\tldlevels\levels
+```
 
 ### 6.3 Validation
 
@@ -167,7 +186,7 @@ Optional deep check: load with SharpGLTF (already a transitive dependency) and v
 
 ### 6.4 Manifest
 
-`manifest.json` + `manifest.csv`, written next to the GLBs (default `Y:\tldlevels\levels`). Paths inside are relative to the manifest:
+`manifest.json` + `manifest.csv`, written next to the GLBs (default `\\VBoxSvr\TLDLevels\tldlevels\levels`). Paths inside are relative to the manifest:
 
 ```json
 {
@@ -201,8 +220,8 @@ Optional deep check: load with SharpGLTF (already a transitive dependency) and v
 ```
 TldLevels.Exporter [options]
 
-  --input <dir>        default: Z:\tld_dlc\wintermute\tld_Data
-  --output <dir>       default: Y:\tldlevels\levels
+  --input <dir>        default: \\VBoxSvr\TheLongDark\tld_dlc\wintermute\tld_Data
+  --output <dir>       default: \\VBoxSvr\TLDLevels\tldlevels\levels
   --levels <spec>      all | 9 | 2-40,76,120        (default: all, level0 excluded)
   --batch-size <n>     levels per loader instance   (default: 1)
   --skip-stubs         skip files < 20 KB           (default: false)
@@ -284,11 +303,11 @@ Measured on `level9`: 7 of 32 materials take the alpha path (`CORPSE_*`, `FX_Tor
 |---|---|---|---|
 | **M0** | `git init`, submodule pinned to 2.0.0, solution builds, `nuget.config`, `.gitignore`, GPL-3.0 LICENSE, Blender auto-detect | 0.5 d | **done** |
 | **M1** | CLI + discovery + loader + GLB export + inspector + manifest + Blender preview; `level9` golden test | 1 d | **done** (`level9`: 19.2 s load, 7.4 s export, 20.5 s preview, 47.5 s total) |
-| **M2** | Batch export of all levels; classification of stubs; failure list; first full manifest + preview contact sheet | 0.5 d (run ~1 h) | next |
+| **M2** | Batch export of all levels; classification of stubs; failure list; first full manifest + preview contact sheet | 0.5 d (run ~1 h) | **running** (166 levels, `--batch-size 10`, resumable) |
 | **M3** | QA pass: preview review, terrain/material fixes, level id → chapter name mapping, large-scene fallback | 1–2 d | planned |
 | **M4** (opt.) | Parallel batches and parallel Blender workers, incremental re-runs, mesh simplification/Draco | 1 d | planned |
 
-M1 was verified end-to-end against `Y:\tldlevels\levels`: the exported GLB matches the golden counts exactly (2,744 nodes / 1,607 meshes / 859,995 triangles / 32 materials / 26 textures / 97.4 MB), the preview is byte-identical to the earlier manual render, and `--force` / existing-file skip / `--dry-run` paths all behave.
+M1 was verified end-to-end against `\\VBoxSvr\TLDLevels\tldlevels\levels`: the exported GLB matches the golden counts exactly (2,744 nodes / 1,607 meshes / 859,995 triangles / 32 materials / 26 textures / 97.4 MB), the preview is byte-identical to the earlier manual render, and `--force` / existing-file skip / `--dry-run` paths all behave.
 
 ## 10. Risks and mitigations
 

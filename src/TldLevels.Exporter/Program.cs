@@ -77,15 +77,58 @@ internal static class Program
 
 		Console.WriteLine($"[run] {levels.Count} level(s) from {options.InputDirectory}");
 		Console.WriteLine($"[run] output {options.OutputDirectory}");
+		Console.WriteLine($"[run] batch size {options.BatchSize}, press Ctrl+C to stop after the current level");
+
+		using CancellationTokenSource cancellation = new();
+		int cancelRequests = 0;
+		ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
+		{
+			if (Interlocked.Increment(ref cancelRequests) > 1)
+			{
+				Console.WriteLine("[cancel] aborting immediately");
+				return;
+			}
+
+			eventArgs.Cancel = true;
+			Console.WriteLine("[cancel] finishing the current level (Ctrl+C again to abort now)");
+			cancellation.Cancel();
+		};
+		Console.CancelKeyPress += cancelHandler;
 
 		DateTimeOffset startedUtc = DateTimeOffset.UtcNow;
 		Stopwatch watch = Stopwatch.StartNew();
 		ExportRunner runner = new(options, renderer);
-		IReadOnlyList<LevelResult> results = runner.Run(levels);
-		watch.Stop();
 
-		string manifestPath = ManifestWriter.Write(options.OutputDirectory, options.InputDirectory, startedUtc, watch.Elapsed, results);
-		PrintSummary(results, watch.Elapsed, manifestPath);
+		// The manifest is rewritten after every completed level, so an
+		// interruption never loses the record of what has already been done.
+		IReadOnlyList<LevelResult> results = runner.Run(
+			levels,
+			snapshot => ManifestWriter.Write(
+				options.OutputDirectory,
+				options.InputDirectory,
+				startedUtc,
+				watch.Elapsed,
+				snapshot,
+				cancellation.IsCancellationRequested),
+			cancellation.Token);
+
+		watch.Stop();
+		Console.CancelKeyPress -= cancelHandler;
+
+		string manifestPath = ManifestWriter.Write(
+			options.OutputDirectory,
+			options.InputDirectory,
+			startedUtc,
+			watch.Elapsed,
+			results,
+			cancellation.IsCancellationRequested);
+
+		PrintSummary(results, watch.Elapsed, manifestPath, cancellation.IsCancellationRequested);
+
+		if (cancellation.IsCancellationRequested)
+		{
+			return 130;
+		}
 
 		return results.Any(result => result.Status == "failed") ? 2 : 0;
 	}
@@ -105,17 +148,18 @@ internal static class Program
 		}
 	}
 
-	private static void PrintSummary(IReadOnlyList<LevelResult> results, TimeSpan elapsed, string manifestPath)
+	private static void PrintSummary(IReadOnlyList<LevelResult> results, TimeSpan elapsed, string manifestPath, bool cancelled)
 	{
 		int ok = results.Count(result => result.Status == "ok");
 		int existing = results.Count(result => result.Status == "existing");
 		int empty = results.Count(result => result.Status == "empty");
 		int failed = results.Count(result => result.Status == "failed");
+		int pending = results.Count(result => result.Status == "pending");
 		long bytes = results.Sum(result => result.Bytes);
 
 		Console.WriteLine();
 		Console.WriteLine(
-			$"[done] ok={ok} existing={existing} empty={empty} failed={failed} " +
+			$"[done] ok={ok} existing={existing} empty={empty} failed={failed} pending={pending} " +
 			$"bytes={Megabytes(bytes):F1} MB time={elapsed.TotalSeconds:F1}s");
 
 		foreach (LevelResult result in results.Where(result => result.Status == "failed"))
@@ -127,6 +171,11 @@ internal static class Program
 		if (warned > 0)
 		{
 			Console.WriteLine($"  warnings: {warned} level(s), see manifest");
+		}
+
+		if (cancelled)
+		{
+			Console.WriteLine($"  interrupted: {pending} level(s) still pending");
 		}
 
 		Console.WriteLine($"[done] manifest {manifestPath}");

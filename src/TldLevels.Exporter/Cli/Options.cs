@@ -3,14 +3,14 @@ using System.Globalization;
 namespace TldLevels.Exporter.Cli;
 
 /// <summary>
-/// Command-line options. Defaults target the installed Wintermute campaign on
-/// <c>Z:</c> and write generated GLBs/previews to <c>Y:</c>, so the repository
-/// stays code-only.
+/// Command-line options. Defaults use the VirtualBox shared-folder UNC paths
+/// (not drive letters) because the guest maps them as Y:/Z: and the letters
+/// have been observed to swap between sessions.
 /// </summary>
 public sealed class Options
 {
-	public const string DefaultInputDirectory = @"Z:\tld_dlc\wintermute\tld_Data";
-	public const string DefaultOutputDirectory = @"Y:\tldlevels\levels";
+	public const string DefaultInputDirectory = @"\\VBoxSvr\TheLongDark\tld_dlc\wintermute\tld_Data";
+	public const string DefaultOutputDirectory = @"\\VBoxSvr\TLDLevels\tldlevels\levels";
 
 	public string InputDirectory { get; set; } = DefaultInputDirectory;
 
@@ -119,9 +119,9 @@ public sealed class Options
 		Usage: TldLevels.Exporter [options]
 
 		  --input <dir>            Campaign data directory
-		                           default: Z:\tld_dlc\wintermute\tld_Data
+		                           default: \\VBoxSvr\TheLongDark\tld_dlc\wintermute\tld_Data
 		  --output <dir>           Where GLBs, PNGs, manifest and logs are written
-		                           default: Y:\tldlevels\levels
+		                           default: \\VBoxSvr\TLDLevels\tldlevels\levels
 		  --levels <spec>          all | 9 | 2-40,76,120        default: all (level0 excluded)
 		  --batch-size <n>         Levels per AssetRipper load     default: 1
 		  --skip-stubs             Skip levels smaller than 20 KB  default: false
