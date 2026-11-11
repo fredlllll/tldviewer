@@ -44,12 +44,6 @@ public static class TerrainBuilder
 
 			ITerrainData? data = terrain.TerrainDataP;
 			string terrainName = terrain.GameObject_C2P?.Name.String ?? "<unnamed>";
-			if (IsAuxiliaryWaterTerrain(terrainName))
-			{
-				Console.WriteLine($"[terrain] {terrainName}: skipped auxiliary water terrain for visualization");
-				continue;
-			}
-
 			if (data is null)
 			{
 				Console.WriteLine($"[terrain] {terrainName}: no TerrainData");
@@ -62,17 +56,20 @@ public static class TerrainBuilder
 				continue;
 			}
 
+
 			if (!seen.Add(data))
 			{
 				Console.WriteLine($"[terrain] {terrainName}: shares TerrainData '{data.Name}'");
 				continue;
 			}
 
+			bool clipZeroHeightCells = IsAuxiliaryWaterTerrain(terrainName);
 			Console.WriteLine(
 				$"[terrain] {terrainName}: '{data.Name}' {data.Heightmap.Width}x{data.Heightmap.Height} " +
-				$"res {data.Heightmap.Resolution} scale {data.Heightmap.Scale.X:F1},{data.Heightmap.Scale.Y:F1},{data.Heightmap.Scale.Z:F1}");
+				$"samples {data.Heightmap.Heights.Count} res {data.Heightmap.Resolution} scale {data.Heightmap.Scale.X:F1},{data.Heightmap.Scale.Y:F1},{data.Heightmap.Scale.Z:F1}" +
+				(clipZeroHeightCells ? " (zero-height cells clipped)" : string.Empty));
 
-			if (TryAdd(sceneBuilder, terrain, data))
+			if (TryAdd(sceneBuilder, terrain, data, clipZeroHeightCells))
 			{
 				added++;
 			}
@@ -90,10 +87,21 @@ public static class TerrainBuilder
 		|| name.Contains("creek", StringComparison.OrdinalIgnoreCase)
 		|| name.Contains("ice", StringComparison.OrdinalIgnoreCase);
 
-	private static bool TryAdd(SceneBuilder sceneBuilder, ITerrain terrain, ITerrainData data)
+	private static bool TryAdd(SceneBuilder sceneBuilder, ITerrain terrain, ITerrainData data, bool clipZeroHeightCells)
 	{
-		int width = Math.Max(data.Heightmap.Width, data.Heightmap.Resolution);
-		int height = Math.Max(data.Heightmap.Height, data.Heightmap.Resolution);
+		int width = data.Heightmap.Width;
+		int height = data.Heightmap.Height;
+		if (width < 2 || height < 2 || width * height != data.Heightmap.Heights.Count)
+		{
+			int inferred = (int)MathF.Sqrt(data.Heightmap.Heights.Count);
+			if (inferred * inferred != data.Heightmap.Heights.Count)
+			{
+				return false;
+			}
+
+			width = inferred;
+			height = inferred;
+		}
 		if (width < 2 || height < 2)
 		{
 			return false;
@@ -132,6 +140,15 @@ public static class TerrainBuilder
 		{
 			for (int x = 0; x < w - 1; x++)
 			{
+				if (clipZeroHeightCells
+					&& (heights[x + y * width] == 0
+						|| heights[x + 1 + y * width] == 0
+						|| heights[x + (y + 1) * width] == 0
+						|| heights[x + 1 + (y + 1) * width] == 0))
+				{
+					continue;
+				}
+
 				primitive.AddTriangle(
 					vertices[y * w + x],
 					vertices[y * w + x + 1],
