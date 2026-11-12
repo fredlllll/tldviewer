@@ -113,7 +113,7 @@ public sealed class LevelLoader : MonoBehaviour
         camera.transform.position = bounds.center + viewDirection * (radius * 1.5f);
         camera.transform.LookAt(bounds.center);
         camera.nearClipPlane = Mathf.Clamp(radius * 0.001f, 0.05f, 5f);
-        camera.farClipPlane = Mathf.Max(radius * 20f, 1000f);
+        camera.farClipPlane = ViewerBootstrap.FarClipPlane;
 
         FlyCamera flyCamera = camera.GetComponent<FlyCamera>();
         if (flyCamera != null)
