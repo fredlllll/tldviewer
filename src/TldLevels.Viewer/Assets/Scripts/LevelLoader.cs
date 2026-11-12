@@ -168,6 +168,23 @@ public sealed class LevelLoader : MonoBehaviour
         return hasBounds;
     }
 
+    private static string SummarizeMaterials(GameObject root)
+    {
+        HashSet<Material> materials = new();
+        foreach (Renderer renderer in root.GetComponentsInChildren<Renderer>())
+        {
+            foreach (Material material in renderer.sharedMaterials)
+            {
+                if (material != null)
+                    materials.Add(material);
+            }
+        }
+
+        int textured = materials.Count(material =>
+            material.HasProperty("baseColorTexture") && material.GetTexture("baseColorTexture") != null);
+        return $"{materials.Count} material(s), {textured} with a base texture.";
+    }
+
     private static float GetSizeCutoff(List<(Bounds Bounds, float Size, string Name)> entries)
     {
         float[] sizes = entries.Select(entry => entry.Size).OrderBy(size => size).ToArray();
@@ -203,7 +220,7 @@ public sealed class LevelLoader : MonoBehaviour
             loadedLevel = root;
             loadedImport = import;
             FrameLoadedLevel();
-            status = $"Loaded {Path.GetFileName(path)}.";
+            status = $"Loaded {Path.GetFileName(path)}. {SummarizeMaterials(root)}";
         }
         catch (Exception exception)
         {
