@@ -16,10 +16,11 @@ public sealed class LevelLoader : MonoBehaviour
     private const string DefaultExportFolder = @"\\VBoxSvr\TLDLevels\tldlevels\levels";
 
     private string exportFolder = DefaultExportFolder;
-    private string selectedPath = string.Empty;
+    private string pathInput = string.Empty;
     private string status = "Choose a GLB to load.";
     private string[] levelFiles = Array.Empty<string>();
     private int selectedIndex;
+    private Vector2 levelListScroll;
     private GameObject loadedLevel;
     private GltfImport loadedImport;
     private bool isLoading;
@@ -32,21 +33,28 @@ public sealed class LevelLoader : MonoBehaviour
 
     private void OnGUI()
     {
-        GUILayout.BeginArea(new Rect(16, 16, 520, 210), GUI.skin.box);
+        GUILayout.BeginArea(new Rect(16, 16, 520, 340), GUI.skin.box);
         GUILayout.Label("TLD Level Viewer", GUI.skin.label);
         GUILayout.Label("Export folder");
         exportFolder = GUILayout.TextField(exportFolder);
         GUILayout.BeginHorizontal();
         if (GUILayout.Button("Refresh", GUILayout.Width(100))) RefreshLevels();
         GUI.enabled = levelFiles.Length > 0 && !isLoading;
-        if (GUILayout.Button("Load selected", GUILayout.Width(130))) _ = LoadAsync(selectedPath);
+        if (GUILayout.Button("Load selected", GUILayout.Width(130))) _ = LoadAsync(levelFiles[selectedIndex]);
         GUI.enabled = true;
         GUILayout.EndHorizontal();
 
         if (levelFiles.Length > 0)
         {
-            selectedIndex = Mathf.Clamp(GUILayout.SelectionGrid(selectedIndex, levelFiles.Select(Path.GetFileNameWithoutExtension).ToArray(), 4), 0, levelFiles.Length - 1);
-            selectedPath = levelFiles[selectedIndex];
+            levelListScroll = GUILayout.BeginScrollView(levelListScroll, GUILayout.Height(120));
+            int newIndex = GUILayout.SelectionGrid(selectedIndex, levelFiles.Select(Path.GetFileNameWithoutExtension).ToArray(), 4);
+            GUILayout.EndScrollView();
+            newIndex = Mathf.Clamp(newIndex, 0, levelFiles.Length - 1);
+            if (newIndex != selectedIndex)
+            {
+                selectedIndex = newIndex;
+                pathInput = levelFiles[selectedIndex];
+            }
         }
         else
         {
@@ -54,10 +62,10 @@ public sealed class LevelLoader : MonoBehaviour
         }
 
         GUILayout.Label("GLB path");
-        selectedPath = GUILayout.TextField(selectedPath);
+        pathInput = GUILayout.TextField(pathInput);
         GUILayout.BeginHorizontal();
-        GUI.enabled = !isLoading && File.Exists(selectedPath);
-        if (GUILayout.Button("Load path")) _ = LoadAsync(selectedPath);
+        GUI.enabled = !isLoading && File.Exists(pathInput);
+        if (GUILayout.Button("Load path")) _ = LoadAsync(pathInput);
         GUI.enabled = loadedLevel != null && !isLoading;
         if (GUILayout.Button("Frame level (F)", GUILayout.Width(140))) FrameLoadedLevel();
         GUI.enabled = true;
@@ -83,7 +91,8 @@ public sealed class LevelLoader : MonoBehaviour
             ? Directory.EnumerateFiles(exportFolder, "*.glb").OrderBy(Path.GetFileName).ToArray()
             : Array.Empty<string>();
         selectedIndex = 0;
-        selectedPath = levelFiles.FirstOrDefault() ?? selectedPath;
+        pathInput = levelFiles.FirstOrDefault() ?? pathInput;
+        levelListScroll = Vector2.zero;
         status = levelFiles.Length == 0 ? $"Folder not found or contains no GLBs: {exportFolder}" : $"Found {levelFiles.Length} level GLB(s).";
     }
 
