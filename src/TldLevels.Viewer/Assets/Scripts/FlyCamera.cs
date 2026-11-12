@@ -1,6 +1,7 @@
 using UnityEngine;
 
-namespace TldLevels.Viewer;
+namespace TldLevels.Viewer
+{
 
 public sealed class FlyCamera : MonoBehaviour
 {
@@ -15,6 +16,11 @@ public sealed class FlyCamera : MonoBehaviour
         Vector3 euler = transform.eulerAngles;
         yaw = euler.y;
         pitch = euler.x;
+    }
+
+    public void SetMoveSpeed(float speed)
+    {
+        moveSpeed = Mathf.Clamp(speed, 1f, 10000f);
     }
 
     private void Update()
@@ -45,4 +51,5 @@ public sealed class FlyCamera : MonoBehaviour
     }
 
     public float MoveSpeed => moveSpeed;
+}
 }

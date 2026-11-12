@@ -8,8 +8,8 @@ not invoke the exporter or generate content on demand.
 
 1. Open `src/TldLevels.Viewer` in Unity Hub with Unity **6000.3.21f1** or a
    compatible Unity 6 editor.
-2. Unity Package Manager fetches the pinned `glTFast` dependency the first time
-   the project is opened.
+2. Unity Package Manager fetches the pinned `glTFast` dependency (version
+   6.20.0) the first time the project is opened.
 3. Open `Assets/Scenes/Viewer.unity` and press Play.
 
 ## Controls
@@ -19,6 +19,7 @@ not invoke the exporter or generate content on demand.
 - **Right mouse button + mouse**: look around
 - **Mouse wheel**: change movement speed
 - **Shift**: move faster
+- **F**: reframe the loaded level
 - **Escape**: release the mouse cursor
 
 At the top-left, choose a GLB from the configured folder or paste an absolute

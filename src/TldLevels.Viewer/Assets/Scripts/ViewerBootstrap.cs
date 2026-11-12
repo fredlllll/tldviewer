@@ -1,6 +1,7 @@
 using UnityEngine;
 
-namespace TldLevels.Viewer;
+namespace TldLevels.Viewer
+{
 
 /// <summary>Creates the minimal runtime viewer environment.</summary>
 public sealed class ViewerBootstrap : MonoBehaviour
@@ -28,4 +29,5 @@ public sealed class ViewerBootstrap : MonoBehaviour
 
         gameObject.AddComponent<LevelLoader>();
     }
+}
 }
