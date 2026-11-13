@@ -36,6 +36,12 @@ public sealed class Options
 	/// <summary>Keep all Unity LOD levels instead of only the highest-detail LOD0.</summary>
 	public bool AllLods { get; set; }
 
+	/// <summary>Write a streamed viewer package (cells + shared textures) instead of a GLB.</summary>
+	public bool ViewerPackage { get; set; }
+
+	/// <summary>Cell edge length in metres for viewer packages.</summary>
+	public float CellSize { get; set; } = 256f;
+
 	/// <summary>Explicit design/base scene associations, expressed as overlayId=baseId.</summary>
 	public Dictionary<int, int> SceneMerges { get; } = [];
 
@@ -105,6 +111,12 @@ public sealed class Options
 				case "--all-lods":
 					options.AllLods = true;
 					break;
+				case "--viewer-package":
+					options.ViewerPackage = true;
+					break;
+				case "--cell-size":
+					options.CellSize = RequirePositiveFloat(args, ref i, arg);
+					break;
 				case "--merge-scene":
 					ParseSceneMerge(options, RequireValue(args, ref i, arg), arg);
 					break;
@@ -154,6 +166,8 @@ public sealed class Options
 		  --merge-overlays <bool>  Merge prop-only design scenes into their art scene  default: true
 		  --no-merge-overlays      Export each level file on its own instead
 		  --all-lods               Keep LOD1/LOD2/etc. meshes (default: LOD0 only)
+		  --viewer-package         Write level.viewer packages (cells + shared textures)
+		  --cell-size <m>          Viewer package cell edge length  default: 256
 		  --merge-scene <a=b>      Export scene a with base scene b (repeatable)
 		  --blender <exe>          Blender executable (auto-detected when omitted)
 		  --preview-script <path>  Render script (auto-detected when omitted)
@@ -191,6 +205,17 @@ public sealed class Options
 	{
 		string text = RequireValue(args, ref index, option);
 		if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double value) || value <= 0)
+		{
+			throw new ArgumentException($"Invalid positive number for {option}: '{text}'");
+		}
+
+		return value;
+	}
+
+	private static float RequirePositiveFloat(string[] args, ref int index, string option)
+	{
+		string text = RequireValue(args, ref index, option);
+		if (!float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out float value) || value <= 0)
 		{
 			throw new ArgumentException($"Invalid positive number for {option}: '{text}'");
 		}

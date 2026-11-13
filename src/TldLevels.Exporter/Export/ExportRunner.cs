@@ -19,6 +19,8 @@ public sealed class LevelResult
 
 	public string? GlbPath { get; set; }
 
+	public string? PackagePath { get; set; }
+
 	public long Bytes { get; set; }
 
 	public double ExportSeconds { get; set; }
@@ -305,6 +307,27 @@ public sealed class ExportRunner
 		LevelResult? result,
 		Progress progress)
 	{
+		if (_options.ViewerPackage)
+		{
+			string packagePath = PackagePath(level);
+			if (!_options.Force && IsPackageComplete(packagePath))
+			{
+				if (result is not null)
+				{
+					result.Status = "existing";
+					result.PackagePath = packagePath;
+					result.Bytes = DirectoryBytes(packagePath);
+					Console.WriteLine($"[{level.SceneName}] package exists  {Megabytes(result.Bytes):F1} MB (use --force to re-export)");
+					progress.Report();
+				}
+
+				return;
+			}
+
+			ExportPackageAssets(level, assets, result, progress, []);
+			return;
+		}
+
 		string glbPath = GlbPath(level);
 
 		if (!_options.Force && _previousManifest.IsComplete(level.SceneName, [], glbPath))
@@ -342,6 +365,37 @@ public sealed class ExportRunner
 		LevelResult? result,
 		Progress progress)
 	{
+		if (_options.ViewerPackage)
+		{
+			string packagePath = PackagePath(overlay);
+			string[] packageIncludes = [art.SceneName];
+			if (!_options.Force && IsPackageComplete(packagePath))
+			{
+				if (result is not null)
+				{
+					result.Status = "existing";
+					result.PackagePath = packagePath;
+					result.Bytes = DirectoryBytes(packagePath);
+					result.Includes.Clear();
+					result.Includes.AddRange(packageIncludes);
+					Console.WriteLine($"[{overlay.SceneName}] package exists  {Megabytes(result.Bytes):F1} MB (base {art.SceneName})");
+					progress.Report();
+				}
+
+				return true;
+			}
+
+			if (result is not null)
+			{
+				result.Includes.Clear();
+				result.Includes.AddRange(packageIncludes);
+			}
+
+			IEnumerable<IUnityObjectBase> packageAssets = artScene.Assets.Concat(overlayScene.Assets);
+			ExportPackageAssets(overlay, packageAssets, result, progress, packageIncludes);
+			return true;
+		}
+
 		string glbPath = GlbPath(overlay);
 		string pngPath = Path.ChangeExtension(glbPath, ".png");
 		string[] includes = [art.SceneName];
@@ -480,6 +534,81 @@ public sealed class ExportRunner
 			return false;
 		}
 	}
+
+	private bool ExportPackageAssets(
+		LevelEntry level,
+		IEnumerable<IUnityObjectBase> assets,
+		LevelResult? result,
+		Progress progress,
+		IReadOnlyList<string> includes)
+	{
+		string packagePath = PackagePath(level);
+		Stopwatch watch = Stopwatch.StartNew();
+
+		try
+		{
+			ViewerPackageResult package = ViewerPackageExporter.Export(
+				assets,
+				packagePath,
+				_options.CellSize,
+				includeAllLods: true);
+			watch.Stop();
+
+			if (result is not null)
+			{
+				result.ExportSeconds = watch.Elapsed.TotalSeconds;
+				result.PackagePath = package.Path;
+				result.Bytes = package.Bytes;
+				result.Status = package.Triangles == 0 ? "empty" : "ok";
+				if (package.Triangles == 0)
+				{
+					result.Warnings.Add("Viewer package contains no triangles");
+				}
+
+				if (package.SkippedNodes > 0)
+				{
+					result.Warnings.Add($"{package.SkippedNodes} node transform(s) skipped (invalid matrix)");
+				}
+			}
+
+			string suffix = includes.Count > 0 ? $" + {string.Join(" + ", includes)}" : string.Empty;
+			Console.WriteLine(
+				$"[{level.SceneName}] package {Megabytes(package.Bytes):F1} MB in {watch.Elapsed.TotalSeconds:F1}s " +
+				$"({package.Cells} cells, {package.MeshCount} meshes, {package.Triangles:N0} tris, {package.Lods} LODs" +
+				$"{(package.SkippedNodes > 0 ? $", {package.SkippedNodes} skipped" : string.Empty)}){suffix}");
+			progress.Report();
+			return true;
+		}
+		catch (Exception exception)
+		{
+			watch.Stop();
+			if (result is not null)
+			{
+				result.ExportSeconds = watch.Elapsed.TotalSeconds;
+				result.Status = "failed";
+				result.Error = exception.Message;
+				Console.WriteLine($"[{level.SceneName}] FAILED: {exception.Message}");
+				progress.Report();
+			}
+			else
+			{
+				Console.WriteLine($"[{level.SceneName}] FAILED (context art): {exception.Message}");
+			}
+
+			return false;
+		}
+	}
+
+	private string PackagePath(LevelEntry level) =>
+		Path.Combine(_options.OutputDirectory, level.SceneName + ".viewer");
+
+	private static bool IsPackageComplete(string packagePath) =>
+		File.Exists(Path.Combine(packagePath, "manifest.json"));
+
+	private static long DirectoryBytes(string path) =>
+		Directory.Exists(path)
+			? Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories).Sum(file => new FileInfo(file).Length)
+			: 0;
 
 	private void RenderPreview(LevelEntry level, string glbPath, LevelResult? result, bool force)
 	{

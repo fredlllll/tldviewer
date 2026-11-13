@@ -6,6 +6,7 @@ using AssetRipper.SourceGenerated.Classes.ClassID_218;
 using AssetRipper.SourceGenerated.Classes.ClassID_4;
 using AssetRipper.SourceGenerated.Extensions;
 using AssetRipper.SourceGenerated.Subclasses.PPtr_TerrainLayer;
+using AssetRipper.Export.Modules.Models;
 using AssetRipper.Export.Modules.Textures;
 using SharpGLTF.Geometry;
 using SharpGLTF.Geometry.VertexTypes;
@@ -92,6 +93,61 @@ public static class TerrainBuilder
 
 	private static bool TryAdd(SceneBuilder sceneBuilder, ITerrain terrain, ITerrainData data, bool clipZeroHeightCells)
 	{
+		if (!TryBuild(terrain, data, clipZeroHeightCells, out MeshBuilder<VertexPosition, VertexTexture1, VertexEmpty>? meshBuilder, out AffineTransform worldTransform, out string name))
+		{
+			return false;
+		}
+
+		NodeBuilder node = new(name)
+		{
+			LocalTransform = worldTransform,
+		};
+
+		sceneBuilder.AddRigidMesh(meshBuilder, node);
+		return true;
+	}
+
+	/// <summary>
+	/// Yields terrain landscapes as standalone draw items, matching the meshes
+	/// that <see cref="AddTerrains"/> adds to a whole-scene export.
+	/// </summary>
+	public static IEnumerable<GlbDrawMesh> BuildDrawMeshes(IEnumerable<IUnityObjectBase> assets)
+	{
+		HashSet<ITerrainData> seen = [];
+		foreach (IUnityObjectBase asset in assets)
+		{
+			if (asset is not ITerrain terrain)
+			{
+				continue;
+			}
+
+			ITerrainData? data = terrain.TerrainDataP;
+			string terrainName = terrain.GameObject_C2P?.Name.String ?? "<unnamed>";
+			if (data is null || data.Heightmap.Heights.Count == 0 || !seen.Add(data))
+			{
+				continue;
+			}
+
+			bool clipZeroHeightCells = IsAuxiliaryWaterTerrain(terrainName);
+			if (TryBuild(terrain, data, clipZeroHeightCells, out MeshBuilder<VertexPosition, VertexTexture1, VertexEmpty>? meshBuilder, out AffineTransform worldTransform, out string name))
+			{
+				yield return new GlbDrawMesh(name, meshBuilder!, worldTransform.Matrix, 0);
+			}
+		}
+	}
+
+	private static bool TryBuild(
+		ITerrain terrain,
+		ITerrainData data,
+		bool clipZeroHeightCells,
+		out MeshBuilder<VertexPosition, VertexTexture1, VertexEmpty>? meshBuilder,
+		out AffineTransform worldTransform,
+		out string name)
+	{
+		meshBuilder = null;
+		worldTransform = AffineTransform.Identity;
+		name = terrain.GameObject_C2P?.Name.String ?? data.Name.String;
+
 		int width = data.Heightmap.Width;
 		int height = data.Heightmap.Height;
 		if (width < 2 || height < 2 || width * height != data.Heightmap.Heights.Count)
@@ -123,8 +179,8 @@ public static class TerrainBuilder
 		{
 			material.WithBaseColor(baseImage);
 		}
-		MeshBuilder<VertexPosition, VertexTexture1, VertexEmpty> meshBuilder = new();
-		var primitive = meshBuilder.UsePrimitive(material);
+		MeshBuilder<VertexPosition, VertexTexture1, VertexEmpty> builder = new();
+		var primitive = builder.UsePrimitive(material);
 		VertexBuilder<VertexPosition, VertexTexture1, VertexEmpty>[] vertices =
 			new VertexBuilder<VertexPosition, VertexTexture1, VertexEmpty>[w * h];
 
@@ -167,13 +223,8 @@ public static class TerrainBuilder
 			}
 		}
 
-		string name = terrain.GameObject_C2P?.Name.String ?? data.Name.String;
-		NodeBuilder node = new(name)
-		{
-			LocalTransform = WorldTransform(terrain),
-		};
-
-		sceneBuilder.AddRigidMesh(meshBuilder, node);
+		meshBuilder = builder;
+		worldTransform = WorldTransform(terrain);
 		return true;
 	}
 

@@ -49,6 +49,7 @@ public static class ManifestWriter
 			sourceBytes = result.Level.SizeBytes,
 			stub = result.Level.IsStub,
 			glb = Relative(outputDirectory, result.GlbPath),
+			package = Relative(outputDirectory, result.PackagePath),
 			bytes = result.Bytes,
 			nodes = result.Stats?.Nodes,
 			meshes = result.Stats?.Meshes,
