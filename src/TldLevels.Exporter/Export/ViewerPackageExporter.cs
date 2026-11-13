@@ -278,7 +278,8 @@ public static class ViewerPackageExporter
 
 		if (Matrix4x4.Decompose(matrix, out Vector3 scale, out Quaternion rotation, out Vector3 translation))
 		{
-			transform = new AffineTransform(translation, rotation, scale);
+			// SharpGLTF's SRT constructor is (scale, rotation, translation).
+			transform = new AffineTransform(scale, rotation, translation);
 			reason = string.Empty;
 			return true;
 		}
@@ -295,20 +296,19 @@ public static class ViewerPackageExporter
 			return false;
 		}
 
+		// Mirroring has to live in the scale, but the rotation basis must stay
+		// proper (determinant +1), so flip the X axis rather than only the scale.
+		float xSign = matrix.GetDeterminant() < 0f ? -1f : 1f;
 		Matrix4x4 rotationMatrix = new(
-			x.X / scaleX, x.Y / scaleX, x.Z / scaleX, 0f,
+			xSign * x.X / scaleX, xSign * x.Y / scaleX, xSign * x.Z / scaleX, 0f,
 			y.X / scaleY, y.Y / scaleY, y.Z / scaleY, 0f,
 			z.X / scaleZ, z.Y / scaleZ, z.Z / scaleZ, 0f,
 			0f, 0f, 0f, 1f);
-		if (matrix.GetDeterminant() < 0f)
-		{
-			scaleX = -scaleX;
-		}
 
 		transform = new AffineTransform(
-			new Vector3(matrix.M41, matrix.M42, matrix.M43),
+			new Vector3(xSign * scaleX, scaleY, scaleZ),
 			Quaternion.CreateFromRotationMatrix(rotationMatrix),
-			new Vector3(scaleX, scaleY, scaleZ));
+			new Vector3(matrix.M41, matrix.M42, matrix.M43));
 		reason = string.Empty;
 		return true;
 	}

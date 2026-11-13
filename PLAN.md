@@ -246,7 +246,41 @@ TldLevels.Exporter [options]
   --preview-size <px>  default: 2048
   --preview-samples <n> default: 16
   --preview-workers <n> parallel Blender processes  (default: 1)
+  --viewer-package     write <level>.viewer cell packages instead of a GLB
+  --cell-size <m>      viewer package cell edge length   (default: 256)
 ```
+
+### 6.6 Viewer packages
+
+`--viewer-package` writes a streamed package in one pass per level instead of a
+GLB:
+
+```
+levelN.viewer/
+  manifest.json          format version, cells, bounds, LOD list, per-cell files
+  materials.json         material names used by the level
+  textures/              unique textures, named by SHA-256 content hash
+  cells/x-1_z0/lod0.gltf
+  cells/x-1_z0/lod0.bin
+```
+
+- Static meshes are split by triangle centroid on a fixed X/Z grid; Unity
+  terrain is split on the same grid. A mesh therefore appears in the cells its
+  triangles actually occupy, not in every cell its AABB overlaps.
+- Cells reference shared textures with relative paths
+  (`../../textures/<hash>.png`), so each unique texture is stored once per level.
+- The manifest is the only source of truth for available LODs; the viewer never
+  probes the file system.
+- `focusMin`/`focusMax` come from the `TerrainDefault` triangles, falling back
+  to the overall mesh bounds for interiors, and drive viewer framing.
+- Package mode does not also write `levelN.glb`.
+
+Draw mesh transforms are world matrices from AssetRipper's scene traversal.
+SharpGLTF's SRT constructor is `AffineTransform(scale, rotation, translation)`;
+passing the components in a different order silently moves every object by its
+own translation (observed as multi-kilometre cell bounds in `level118`). The
+package smoke test therefore rejects cell bounds that are far outside the level
+bounds or implausibly large for the configured grid.
 
 ## 7. Golden test
 
@@ -359,4 +393,4 @@ M1 was verified end-to-end against `\\VBoxSvr\TLDLevels\tldlevels\levels`: the e
 - Lights, cameras, colliders, navmesh, audio, particles
 - Animations and rigged characters
 - Texture repacking or shader decompilation
-- Rebuilding a Unity project (AssetRipper's "Unity project" export) — only `.glb` is produced
+- Rebuilding a Unity project (AssetRipper's "Unity project" export) - only `.glb` and `.viewer` packages are produced

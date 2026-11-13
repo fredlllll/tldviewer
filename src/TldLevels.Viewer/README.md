@@ -70,7 +70,9 @@ loaded cells.
 
 The editor has a batch-mode test that loads the largest cell of a package,
 instantiates it, applies the shared textures and fails if any placeholder
-texture survives:
+texture survives or if the cell's renderer bounds are outside the level or
+implausibly large for the configured cell size (which catches broken node
+transforms):
 
 ```powershell
 Unity.exe -batchmode -nographics `

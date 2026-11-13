@@ -74,6 +74,20 @@ namespace TldLevels.Viewer
             return new Bounds(Vector3.zero, Vector3.one * 100f);
         }
 
+        /// <summary>
+        /// Full level bounds in Unity space, including the sky shell and distant
+        /// backdrop. Used to sanity-check streamed cell placement.
+        /// </summary>
+        public Bounds GetWorldBounds()
+        {
+            if (TryMakeBounds(min, max, out Bounds total))
+            {
+                return total;
+            }
+
+            return GetFocusBounds();
+        }
+
         public static Vector3 ToUnity(float[] value)
         {
             if (value == null || value.Length < 3)

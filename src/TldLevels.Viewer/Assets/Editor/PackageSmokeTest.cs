@@ -144,11 +144,31 @@ public static class PackageSmokeTest
             Debug.Log($"[smoke] cell instantiated: {renderers.Length} renderers, {materialSlots} material slots, " +
                 $"{baseTextured} shared base textures, {placeholderTextures} placeholders, " +
                 $"{textures.Count} cached textures");
-            Debug.Log($"[smoke] bounds: {GetBounds(root)}");
+            Bounds bounds = GetBounds(root);
+            Debug.Log($"[smoke] bounds: {bounds}");
 
             if (renderers.Length == 0 || materialSlots == 0 || textures.Count == 0 || baseTextured == 0)
             {
                 throw new InvalidOperationException("Cell loaded but shared textures were not applied.");
+            }
+
+            // A cell holds geometry near its own grid position. A transform that
+            // swaps scale and translation (or otherwise explodes) shows up here
+            // long before anyone notices in the renderer.
+            Bounds world = manifest.GetWorldBounds();
+            float margin = manifest.cellSize;
+            Bounds allowed = new Bounds(world.center, world.size + Vector3.one * margin * 2f);
+            if (!allowed.Contains(bounds.center))
+            {
+                throw new InvalidOperationException(
+                    $"Cell bounds center {bounds.center} is outside the level bounds {world}.");
+            }
+
+            float extent = Mathf.Max(bounds.size.x, Mathf.Max(bounds.size.y, bounds.size.z));
+            if (extent > manifest.cellSize * 8f)
+            {
+                throw new InvalidOperationException(
+                    $"Cell bounds {bounds.size} are implausibly large for a {manifest.cellSize} m grid.");
             }
 
             exitCode = 0;
