@@ -9,7 +9,7 @@ using UnityEngine;
 namespace TldLevels.Viewer
 {
 
-/// <summary>Loads one complete local GLB. Future cell streaming belongs here.</summary>
+/// <summary>Loads a whole local GLB or streams a <c>.viewer</c> cell package.</summary>
 public sealed class LevelLoader : MonoBehaviour
 {
     private const string ExportFolderKey = "TldLevels.Viewer.ExportFolder";
@@ -17,12 +17,13 @@ public sealed class LevelLoader : MonoBehaviour
 
     private string exportFolder = DefaultExportFolder;
     private string pathInput = string.Empty;
-    private string status = "Choose a GLB to load.";
-    private string[] levelFiles = Array.Empty<string>();
+    private string status = "Choose a level to load.";
+    private string[] levelEntries = Array.Empty<string>();
     private int selectedIndex;
     private Vector2 levelListScroll;
     private GameObject loadedLevel;
     private GltfImport loadedImport;
+    private PackageStreamer packageStreamer;
     private bool isLoading;
 
     private void Start()
@@ -33,43 +34,60 @@ public sealed class LevelLoader : MonoBehaviour
 
     private void OnGUI()
     {
-        GUILayout.BeginArea(new Rect(16, 16, 520, 340), GUI.skin.box);
+        GUILayout.BeginArea(new Rect(16, 16, 520, 420), GUI.skin.box);
         GUILayout.Label("TLD Level Viewer", GUI.skin.label);
         GUILayout.Label("Export folder");
         exportFolder = GUILayout.TextField(exportFolder);
         GUILayout.BeginHorizontal();
         if (GUILayout.Button("Refresh", GUILayout.Width(100))) RefreshLevels();
-        GUI.enabled = levelFiles.Length > 0 && !isLoading;
-        if (GUILayout.Button("Load selected", GUILayout.Width(130))) _ = LoadAsync(levelFiles[selectedIndex]);
+        GUI.enabled = levelEntries.Length > 0 && !isLoading;
+        if (GUILayout.Button("Load selected", GUILayout.Width(130))) Load(levelEntries[selectedIndex]);
         GUI.enabled = true;
         GUILayout.EndHorizontal();
 
-        if (levelFiles.Length > 0)
+        if (levelEntries.Length > 0)
         {
             levelListScroll = GUILayout.BeginScrollView(levelListScroll, GUILayout.Height(120));
-            int newIndex = GUILayout.SelectionGrid(selectedIndex, levelFiles.Select(Path.GetFileNameWithoutExtension).ToArray(), 4);
+            string[] labels = new string[levelEntries.Length];
+            for (int i = 0; i < levelEntries.Length; i++)
+                labels[i] = Path.GetFileName(levelEntries[i]);
+            int newIndex = GUILayout.SelectionGrid(selectedIndex, labels, 3);
             GUILayout.EndScrollView();
-            newIndex = Mathf.Clamp(newIndex, 0, levelFiles.Length - 1);
+            newIndex = Mathf.Clamp(newIndex, 0, levelEntries.Length - 1);
             if (newIndex != selectedIndex)
             {
                 selectedIndex = newIndex;
-                pathInput = levelFiles[selectedIndex];
+                pathInput = levelEntries[selectedIndex];
             }
         }
         else
         {
-            GUILayout.Label("No GLB files found. Paste a path below.");
+            GUILayout.Label("No GLBs or .viewer packages found. Paste a path below.");
         }
 
-        GUILayout.Label("GLB path");
+        GUILayout.Label("Level path (GLB or .viewer)");
         pathInput = GUILayout.TextField(pathInput);
         GUILayout.BeginHorizontal();
-        GUI.enabled = !isLoading && File.Exists(pathInput);
-        if (GUILayout.Button("Load path")) _ = LoadAsync(pathInput);
-        GUI.enabled = loadedLevel != null && !isLoading;
+        GUI.enabled = !isLoading && (File.Exists(pathInput) || Directory.Exists(pathInput));
+        if (GUILayout.Button("Load path")) Load(pathInput);
+        GUI.enabled = IsSomethingLoaded() && !isLoading;
         if (GUILayout.Button("Frame level (F)", GUILayout.Width(140))) FrameLoadedLevel();
         GUI.enabled = true;
         GUILayout.EndHorizontal();
+
+        if (packageStreamer != null && packageStreamer.IsRunning)
+        {
+            GUILayout.Label($"Load radius {packageStreamer.LoadRadius:F0} m (unload {packageStreamer.UnloadRadius:F0} m)");
+            float radius = GUILayout.HorizontalSlider(packageStreamer.LoadRadius, 256f, 4000f);
+            if (Mathf.Abs(radius - packageStreamer.LoadRadius) > 0.5f)
+            {
+                packageStreamer.LoadRadius = radius;
+                packageStreamer.UnloadRadius = radius * 1.4f;
+            }
+
+            GUILayout.Label(packageStreamer.StatusLine);
+        }
+
         GUILayout.Label(status);
         GUILayout.EndArea();
 
@@ -80,20 +98,37 @@ public sealed class LevelLoader : MonoBehaviour
 
     private void Update()
     {
-        if (Input.GetKeyDown(KeyCode.F) && loadedLevel != null)
+        if (Input.GetKeyDown(KeyCode.F) && IsSomethingLoaded())
             FrameLoadedLevel();
     }
+
+    private bool IsSomethingLoaded() =>
+        loadedLevel != null || (packageStreamer != null && packageStreamer.IsRunning);
 
     private void RefreshLevels()
     {
         PlayerPrefs.SetString(ExportFolderKey, exportFolder);
-        levelFiles = Directory.Exists(exportFolder)
-            ? Directory.EnumerateFiles(exportFolder, "*.glb").OrderBy(Path.GetFileName).ToArray()
-            : Array.Empty<string>();
+        if (!Directory.Exists(exportFolder))
+        {
+            levelEntries = Array.Empty<string>();
+            status = $"Folder not found: {exportFolder}";
+            return;
+        }
+
+        string[] glbs = Directory.GetFiles(exportFolder, "*.glb");
+        string[] packages = Directory.GetDirectories(exportFolder, "*.viewer")
+            .Where(directory => File.Exists(Path.Combine(directory, "manifest.json")))
+            .ToArray();
+        levelEntries = glbs
+            .Concat(packages)
+            .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         selectedIndex = 0;
-        pathInput = levelFiles.FirstOrDefault() ?? pathInput;
+        pathInput = levelEntries.FirstOrDefault() ?? pathInput;
         levelListScroll = Vector2.zero;
-        status = levelFiles.Length == 0 ? $"Folder not found or contains no GLBs: {exportFolder}" : $"Found {levelFiles.Length} level GLB(s).";
+        status = levelEntries.Length == 0
+            ? $"Folder contains no GLBs or .viewer packages: {exportFolder}"
+            : $"Found {glbs.Length} GLB(s) and {packages.Length} package(s).";
     }
 
     private void FrameLoadedLevel()
@@ -123,6 +158,15 @@ public sealed class LevelLoader : MonoBehaviour
     private bool TryGetContentBounds(out Bounds result)
     {
         result = default;
+        if (packageStreamer != null && packageStreamer.IsRunning)
+        {
+            result = packageStreamer.FocusBounds;
+            return true;
+        }
+
+        if (loadedLevel == null)
+            return false;
+
         Renderer[] renderers = loadedLevel.GetComponentsInChildren<Renderer>();
         var entries = new List<(Bounds Bounds, float Size, string Name)>();
         foreach (Renderer renderer in renderers)
@@ -195,7 +239,69 @@ public sealed class LevelLoader : MonoBehaviour
     private static bool IsFinite(Vector3 value) =>
         float.IsFinite(value.x) && float.IsFinite(value.y) && float.IsFinite(value.z);
 
-    private async Task LoadAsync(string path)
+    private void Load(string path)
+    {
+        if (isLoading)
+            return;
+
+        if (Directory.Exists(path))
+        {
+            LoadPackage(path);
+        }
+        else if (File.Exists(path))
+        {
+            _ = LoadGlbAsync(path);
+        }
+    }
+
+    private void LoadPackage(string path)
+    {
+        if (!PackageManifest.TryLoad(path, out PackageManifest manifest, out string error))
+        {
+            status = error;
+            return;
+        }
+
+        isLoading = true;
+        status = $"Opening {Path.GetFileName(path)}...";
+        try
+        {
+            UnloadCurrent();
+            if (packageStreamer == null)
+            {
+                var streamerObject = new GameObject("Package Streamer");
+                packageStreamer = streamerObject.AddComponent<PackageStreamer>();
+            }
+
+            packageStreamer.Initialize(manifest, path);
+            FrameLoadedLevel();
+            status = $"Streaming {manifest.level} ({manifest.cells.Length} cells). Use F to reframe.";
+        }
+        catch (Exception exception)
+        {
+            status = $"Package load failed: {exception.Message}";
+            Debug.LogException(exception);
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void UnloadCurrent()
+    {
+        if (loadedLevel != null)
+        {
+            Destroy(loadedLevel);
+            loadedLevel = null;
+        }
+
+        loadedImport?.Dispose();
+        loadedImport = null;
+        packageStreamer?.Shutdown();
+    }
+
+    private async System.Threading.Tasks.Task LoadGlbAsync(string path)
     {
         if (isLoading || !File.Exists(path)) return;
         isLoading = true;
@@ -215,8 +321,7 @@ public sealed class LevelLoader : MonoBehaviour
                 throw new InvalidOperationException("glTFast could not instantiate this GLB.");
             }
 
-            if (loadedLevel != null) Destroy(loadedLevel);
-            loadedImport?.Dispose();
+            UnloadCurrent();
             loadedLevel = root;
             loadedImport = import;
             FrameLoadedLevel();
