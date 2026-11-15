@@ -100,6 +100,8 @@ C:\Projects\tldlevels\               repo: code only
 \\VBoxSvr\TLDLevels\tldlevels\levels\      generated, outside the repo
 ├─ levelN.glb
 ├─ levelN.png
+├─ levelN.viewer/              streamed cell package (with --viewer-package)
+├─ shared/                     global content-addressed assets + textures
 ├─ manifest.json
 ├─ manifest.csv
 └─ export.log
@@ -246,51 +248,98 @@ TldLevels.Exporter [options]
   --preview-size <px>  default: 2048
   --preview-samples <n> default: 16
   --preview-workers <n> parallel Blender processes  (default: 1)
-  --viewer-package     write <level>.viewer cell packages instead of a GLB
+  --viewer-package     write <level>.viewer packages (shared assets + cells)
   --cell-size <m>      viewer package cell edge length   (default: 256)
 ```
 
 ### 6.6 Viewer packages
 
 `--viewer-package` writes a streamed package in one pass per level instead of a
-GLB:
+GLB. Terrain, sky shells, distant backdrop and oversized meshes stay in the
+cell files; every other mesh is content-addressed into a shared library at the
+output root:
 
 ```
-levelN.viewer/
-  manifest.json          format version, cells, bounds, LOD list, per-cell files
-  materials.json         material names used by the level
-  textures/              unique textures, named by SHA-256 content hash
-  cells/x-1_z0/lod0.gltf
-  cells/x-1_z0/lod0.bin
-  cells/x-1_z0/lod1.gltf  (cells whose objects provide a coarser authored LOD)
-  cells/x-1_z0/lod1.bin
+<output>/
+  shared/
+    assets/<id>.gltf        one mesh + one material per file
+    assets/<id>.bin
+    textures/<sha256>.png   unique textures, shared by every level
+  levelN.viewer/
+    manifest.json           formatVersion 2, shared root, assets and cells
+    materials.json          material names used by the level
+    cells/x-1_z0/lod0.gltf
+    cells/x-1_z0/lod0.bin
+    cells/x-1_z0/lod1.gltf  (cells whose objects provide a coarser authored LOD)
+    cells/x-1_z0/instances.json
 ```
 
-- Static meshes are split by triangle centroid on a fixed X/Z grid; Unity
-  terrain is split on the same grid. A mesh therefore appears in the cells its
-  triangles actually occupy, not in every cell its AABB overlaps.
-- Cells reference shared textures with relative paths
-  (`../../textures/<hash>.png`), so each unique texture is stored once per level.
+- Static cell-local meshes are split by triangle centroid on a fixed X/Z grid;
+  Unity terrain is split on the same grid. A mesh therefore appears in the cells
+  its triangles actually occupy, not in every cell its AABB overlaps.
+- A draw mesh is cell-local when all of its primitives use `TerrainDefault`, any
+  material is a sky/distant-backdrop material (`TRN_Sky*`,
+  `TRN_MountainDistant*`), or its world X/Z extent exceeds one cell. Everything
+  else becomes a shared instance. Oversized props stay in the cell so they do
+  not pop in and out with the streaming grid.
+- A shared asset id is a 128-bit FNV of the primitive geometry (positions,
+  normals, tangents, colours, UVs, indices), the material parameters and the
+  image bytes. SharpGLTF's own content hash is not used because its string hash
+  is process-randomised. Because the id is content-based, identical trees,
+  houses, props and materials resolve to the same file in every level, and an
+  existing `<id>.gltf`/`<id>.bin` pair is reused instead of rewritten.
+- Shared textures are named by the first 8 bytes of their SHA-256 (16 hex
+  characters) and stored once under `shared/textures`, regardless of how many
+  assets or levels reference them. Cell files reference them with relative
+  paths (`../../../shared/textures/<name>`), assets with `../textures/<name>`.
+- Each instance is assigned to one cell by its world-bounds centre. The cell's
+  `instances.json` stores the transform and the asset ids of every authored LOD
+  (`{"level":0,"assets":[...],"triangles":N}`), so the viewer selects a LOD per
+  instance. `manifest.json` lists every shared asset and every cell LOD file;
+  it is the only source of truth, and the viewer never probes the file system.
 - Package mode always keeps authored Unity LODs (`LOD1`, `LOD2`, …), independent
   of `--all-lods` (which only affects GLB exports). Authored LOD objects live in
   the same scene with a `_LODn` suffix and the same transform, so the exporter
   pairs them by stripped name and transform.
-- The viewer selects a LOD per cell from the manifest; the manifest is the only
-  source of truth and the viewer never probes the file system. A level whose
-  scene only provides `_LOD0` stays at one LOD.
-- Every written LOD is a complete cell snapshot. Authored LOD files only contain
-  the objects that have that level, so terrain and LOD0-only props would vanish
-  on switch; each object instead falls back to its highest authored LOD at or
-  below the requested level (or its lowest authored LOD when it has none), and
-  the manifest reports the triangles actually written per LOD file.
+- Every written cell LOD is a complete snapshot of its cell-local geometry.
+  Authored LOD files only contain the objects that have that level, so terrain
+  and LOD0-only props would vanish on switch; each object instead falls back to
+  its highest authored LOD at or below the requested level (or its lowest
+  authored LOD when it has none), and the manifest reports the triangles
+  actually written per LOD file.
 - `focusMin`/`focusMax` come from the `TerrainDefault` triangles, falling back
   to the overall mesh bounds for interiors, and drive viewer framing.
 - Package mode does not also write `levelN.glb`.
+- Shared assets are content-addressed and never deleted on `--force`; orphaned
+  assets from a changed cell size or a removed level are harmless.
+
+Measured sizes with the shared library (`--cell-size 256`, authored LODs):
+
+| Level | Package | Shared assets | Shared textures | Instances | Cells / LODs | Package build |
+|---|---:|---:|---:|---:|---:|---:|
+| `level1` | 4.1 MB | 15.9 MB (747) | 157.1 MB (74) | 585 | 344 / 3 | 60 s |
+| `level111` | 53.6 MB | 68.5 MB (4,991) | 194.8 MB (154) | 19,062 | 701 / 4 | 240 s |
+| `level118` | 47.0 MB | 110.6 MB (7,007) | 276.6 MB (216 new) | 11,401 | 668 / 5 | 226 s |
+
+The earlier per-cell layout produced 726.4 MB for `level111` (1,615.5 MB before
+per-cell mesh dedup) and 914.6 MB for `level118`; `level1` alone was 205.3 MB,
+48.0 MB of it cells. Exporting `level118` into the same output root as `level1`
+reused 17 assets and added 216 textures to the existing 74; 214 of `level118`'s
+asset ids also match `level111`, so a combined export stores those once. Caching each
+material fingerprint (including texture bytes) per `MaterialBuilder`, computing
+world bounds once, reusing single-primitive source meshes and skipping
+already-written assets cut `level111`'s first export from 1,332 s to 240 s.
+
+The viewer loads a shared asset glTF once, takes `GetMesh(0,0)` and
+`GetMaterial(0)`, and keeps the import alive for the lifetime of the level.
+glTF cannot reference a mesh defined in another file, so this cache, not the
+package format, is what makes reuse real at runtime.
 
 The shared texture cache in the viewer owns its textures and marks them
-`HideFlags.DontUnloadUnusedAsset`. They are referenced only from managed code,
-so Unity's editor asset GC would otherwise destroy them while the next cell or
-LOD imports and leave that cell's materials with glTFast's 1×1 placeholders.
+`HideFlags.DontUnloadUnusedAsset`, as do cached meshes and materials. They are
+referenced only from managed code, so Unity's editor asset GC would otherwise
+destroy them while the next cell or asset imports and leave materials with
+glTFast's 1×1 placeholders.
 
 Draw mesh transforms are world matrices from AssetRipper's scene traversal.
 SharpGLTF's SRT constructor is `AffineTransform(scale, rotation, translation)`;

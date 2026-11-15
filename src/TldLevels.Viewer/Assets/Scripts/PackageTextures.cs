@@ -12,13 +12,13 @@ using Material = UnityEngine.Material;
 namespace TldLevels.Viewer
 {
     /// <summary>
-    /// Per-level texture cache shared by every streamed cell.
+    /// Shared texture cache used by streamed cells and asset imports.
     /// <para>
-    /// Package cells reference the same hash-named PNG files in
-    /// <c>textures/</c>. glTFast would decode one copy per cell; instead the
-    /// custom download provider hands out 1x1 placeholders and this cache
-    /// supplies the real, deduplicated textures when cell materials are
-    /// patched after instantiation.
+    /// Packages reference hash-named PNG files in the shared
+    /// <c>textures/</c> folder. glTFast would decode one copy per cell or
+    /// asset; instead the custom download provider hands out 1x1 placeholders
+    /// and this cache supplies the real, deduplicated textures when materials
+    /// are patched after instantiation.
     /// </para>
     /// </summary>
     public sealed class PackageTextures : IDisposable
@@ -26,9 +26,9 @@ namespace TldLevels.Viewer
         private readonly string textureDirectory;
         private readonly Dictionary<string, Texture2D> textures = new Dictionary<string, Texture2D>();
 
-        public PackageTextures(string packageDirectory)
+        public PackageTextures(string textureDirectory)
         {
-            textureDirectory = Path.Combine(packageDirectory, "textures");
+            this.textureDirectory = textureDirectory;
         }
 
         public int Count => textures.Count;
@@ -212,7 +212,14 @@ namespace TldLevels.Viewer
             {
                 if (texture != null)
                 {
-                    UnityEngine.Object.Destroy(texture);
+                    if (Application.isPlaying)
+                    {
+                        UnityEngine.Object.Destroy(texture);
+                    }
+                    else
+                    {
+                        UnityEngine.Object.DestroyImmediate(texture);
+                    }
                 }
             }
 

@@ -22,6 +22,18 @@ namespace TldLevels.Viewer
         public float[] max;
         public float[] focusMin;
         public float[] focusMax;
+
+        /// <summary>
+        /// Path to the shared asset root, relative to the package directory.
+        /// Version 1 packages leave this null and keep their data self-contained.
+        /// </summary>
+        public string shared;
+
+        /// <summary>
+        /// Content-addressed meshes referenced by this level's instances.
+        /// </summary>
+        public PackageAssetManifest[] assets;
+
         public PackageCellManifest[] cells;
 
         public static bool TryLoad(string packageDirectory, out PackageManifest manifest, out string error)
@@ -98,6 +110,22 @@ namespace TldLevels.Viewer
             return new Vector3(-value[0], value[1], value[2]);
         }
 
+        /// <summary>
+        /// Shared asset root in absolute form. Version 1 packages have no
+        /// shared root, so the package directory itself is the fallback.
+        /// </summary>
+        public string GetSharedDirectory(string packageDirectory)
+        {
+            if (string.IsNullOrEmpty(shared))
+            {
+                return packageDirectory;
+            }
+
+            return Path.GetFullPath(Path.Combine(
+                packageDirectory,
+                shared.Replace('/', Path.DirectorySeparatorChar)));
+        }
+
         private static bool TryMakeBounds(float[] minValue, float[] maxValue, out Bounds bounds)
         {
             bounds = default;
@@ -130,6 +158,8 @@ namespace TldLevels.Viewer
         public float[] min;
         public float[] max;
         public float[] center;
+        public string instances;
+        public int instanceCount;
         public PackageLodManifest[] lods;
 
         public Vector3 UnityCenter => PackageManifest.ToUnity(center);
@@ -188,5 +218,116 @@ namespace TldLevels.Viewer
         public string file;
         public long triangles;
         public long bytes;
+    }
+
+    [Serializable]
+    public sealed class PackageAssetManifest
+    {
+        public string id;
+        public string file;
+        public string material;
+        public long triangles;
+        public long bytes;
+    }
+
+    [Serializable]
+    public sealed class PackageInstancesFile
+    {
+        public string cell;
+        public PackageInstance[] instances;
+    }
+
+    [Serializable]
+    public sealed class PackageInstance
+    {
+        public string name;
+        public float[] t;
+        public float[] r;
+        public float[] s;
+        public PackageInstanceLod[] lods;
+
+        public Vector3 UnityPosition => PackageManifest.ToUnity(t);
+
+        public Quaternion UnityRotation
+        {
+            get
+            {
+                if (r == null || r.Length < 4)
+                {
+                    return Quaternion.identity;
+                }
+
+                // Matches glTFast's node conversion.
+                return new Quaternion(r[0], -r[1], -r[2], r[3]);
+            }
+        }
+
+        public Vector3 UnityScale
+        {
+            get
+            {
+                if (s == null || s.Length < 3)
+                {
+                    return Vector3.one;
+                }
+
+                return new Vector3(s[0], s[1], s[2]);
+            }
+        }
+
+        public PackageInstanceLod SelectLod(int desiredLevel) =>
+            PackageLodSelection.Select(lods, desiredLevel);
+    }
+
+    [Serializable]
+    public sealed class PackageInstanceLod
+    {
+        public int level;
+        public string[] assets;
+        public long triangles;
+    }
+
+    internal static class PackageLodSelection
+    {
+        public static PackageInstanceLod Select(PackageInstanceLod[] lods, int desiredLevel)
+        {
+            if (lods == null || lods.Length == 0)
+            {
+                return null;
+            }
+
+            PackageInstanceLod best = null;
+            foreach (PackageInstanceLod lod in lods)
+            {
+                if (best == null)
+                {
+                    best = lod;
+                    continue;
+                }
+
+                bool candidateFits = lod.level >= desiredLevel;
+                bool bestFits = best.level >= desiredLevel;
+                if (candidateFits != bestFits)
+                {
+                    if (candidateFits)
+                    {
+                        best = lod;
+                    }
+                }
+                else if (candidateFits)
+                {
+                    if (lod.level < best.level)
+                    {
+                        best = lod;
+                    }
+                }
+                else if (lod.level > best.level)
+                {
+                    best = lod;
+                }
+            }
+
+            return best;
+        }
     }
 }

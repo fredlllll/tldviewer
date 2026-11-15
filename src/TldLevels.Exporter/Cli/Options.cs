@@ -36,7 +36,7 @@ public sealed class Options
 	/// <summary>Keep all Unity LOD levels instead of only the highest-detail LOD0.</summary>
 	public bool AllLods { get; set; }
 
-	/// <summary>Write a streamed viewer package (cells + shared textures) instead of a GLB.</summary>
+	/// <summary>Write a streamed viewer package (shared asset library + cells) instead of a GLB.</summary>
 	public bool ViewerPackage { get; set; }
 
 	/// <summary>Cell edge length in metres for viewer packages.</summary>
@@ -166,7 +166,7 @@ public sealed class Options
 		  --merge-overlays <bool>  Merge prop-only design scenes into their art scene  default: true
 		  --no-merge-overlays      Export each level file on its own instead
 		  --all-lods               Keep LOD1/LOD2/etc. in GLB exports (default: LOD0 only)
-		  --viewer-package         Write level.viewer packages (cells + shared textures)
+		  --viewer-package         Write level.viewer packages (shared assets + cells)
 		  --cell-size <m>          Viewer package cell edge length  default: 256
 		  --merge-scene <a=b>      Export scene a with base scene b (repeatable)
 		  --blender <exe>          Blender executable (auto-detected when omitted)

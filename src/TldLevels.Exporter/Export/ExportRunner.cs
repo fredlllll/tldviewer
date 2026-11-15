@@ -573,8 +573,11 @@ public sealed class ExportRunner
 
 			string suffix = includes.Count > 0 ? $" + {string.Join(" + ", includes)}" : string.Empty;
 			Console.WriteLine(
-				$"[{level.SceneName}] package {Megabytes(package.Bytes):F1} MB in {watch.Elapsed.TotalSeconds:F1}s " +
-				$"({package.Cells} cells, {package.MeshCount} meshes, {package.Triangles:N0} tris, {package.Lods} LODs" +
+				$"[{level.SceneName}] package {Megabytes(package.Bytes):F1} MB + " +
+				$"{Megabytes(package.SharedBytes):F1} MB shared in {watch.Elapsed.TotalSeconds:F1}s " +
+				$"({package.Cells} cells, {package.Instances:N0} instances, {package.Assets:N0} shared assets, " +
+				$"{package.MeshCount} meshes, {package.Triangles:N0} tris, {package.Lods} LODs" +
+				$"{(package.SharedNodes > 0 ? $", {package.SharedNodes:N0} cell-local shared" : string.Empty)}" +
 				$"{(package.SkippedNodes > 0 ? $", {package.SkippedNodes} skipped" : string.Empty)}){suffix}");
 			progress.Report();
 			return true;

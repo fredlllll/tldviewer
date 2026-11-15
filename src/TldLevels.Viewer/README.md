@@ -30,53 +30,72 @@ shared export location: `\\VBoxSvr\TLDLevels\tldlevels\levels`.
 
 When a package is open, a slider sets the streaming radius (256–4000 m). Cells
 are loaded nearest-first and released once they are well outside that radius.
-The status line reports loaded cells, queued cells, triangles and the number of
-shared textures currently cached.
+Trees, houses and props are instantiated from the shared asset library, with a
+LOD chosen per instance. The status line reports loaded cells, queued cells,
+triangles, loaded/known shared assets and the number of cached textures.
 
 ## Package format
 
-A package is generated once per level by the exporter
-(`--viewer-package`) and is self-contained:
+A package is generated once per level by the exporter (`--viewer-package`).
+Level-independent geometry lives in a shared library at the output root, so
+several levels reference the same meshes and textures:
 
 ```
-level1.viewer/
-  manifest.json          cells, bounds, LOD list and file names
-  materials.json         material names used by the level
-  textures/              shared textures, named by content hash
-  cells/x-1_z0/lod0.gltf
-  cells/x-1_z0/lod0.bin
+<output>/
+  shared/
+    assets/<id>.gltf        one mesh + one material per file
+    assets/<id>.bin
+    textures/<sha256>.png   unique textures, shared by every level
+  level1.viewer/
+    manifest.json           formatVersion 2, shared root, assets and cells
+    materials.json          material names used by the level
+    cells/x-1_z0/lod0.gltf
+    cells/x-1_z0/lod0.bin
+    cells/x-1_z0/instances.json
 ```
 
-- Every cell is split by triangle centroid on the configured grid
-  (`--cell-size`, default 256 m), including Unity terrain.
-- Cells reference textures with relative paths (`../../textures/<hash>.png`),
-  so each unique texture exists once per level instead of once per cell.
-- `manifest.json` is the only source of truth for which LOD levels exist; the
-  viewer picks a LOD per cell from the manifest and never checks the file system
-  for optional levels.
-- The exporter always keeps the authored Unity LODs (`LOD1`, `LOD2`, …). Each
-  written LOD file is a complete snapshot of its cell: objects without a
-  matching authored LOD (terrain, `_LOD0`-only props) fall back to their closest
-  level, so switching to a coarser LOD never removes geometry.
+- Terrain, sky shells, distant backdrop and oversized meshes stay in the cell
+  files. Cell-local geometry is split by triangle centroid on the configured
+  grid (`--cell-size`, default 256 m), including Unity terrain.
+- Every other mesh is stored once in `shared/assets`, addressed by a 128-bit
+  content hash of its geometry, material and texture bytes. Cells reference
+  textures with relative paths (`../../../shared/textures/<name>`); assets use
+  `../textures/<name>`.
+- `instances.json` assigns each object to one cell and stores its transform plus
+  the asset ids for every authored LOD. The viewer chooses a LOD per instance at
+  distance, not per cell.
+- `manifest.json` is the only source of truth for which assets and LOD files
+  exist; the viewer never checks the file system for optional content or
+  generates anything.
+- Each cell LOD file is a complete snapshot of its cell-local geometry: objects
+  without a matching authored LOD (terrain, `_LOD0`-only props) fall back to
+  their closest level, so switching to a coarser LOD never removes geometry.
+- Shared assets are never deleted by the exporter, so a package can be updated
+  or re-exported without invalidating another level that uses the same assets.
 
-## Shared texture cache
+## Shared asset cache
 
-glTFast normally decodes every texture referenced by every cell. For packages,
-`ViewerDownloadProvider` returns a 1×1 placeholder during import and
-`PackageTextures` then replaces each material slot with a texture from the
-per-level cache, deduplicated by hash file name, color space and sampler. This
-keeps runtime texture memory proportional to the level, not to the number of
-loaded cells. The cache marks its textures `HideFlags.DontUnloadUnusedAsset`:
-they are referenced only from managed code, so Unity's editor asset GC would
-otherwise unload them while the next cell or LOD is imported and leave its
-materials with placeholders.
+glTF cannot reference a mesh defined in another file, so `PackageAssets` loads
+each `<id>.gltf` lazily (at most four at a time), calls `GetMesh(0,0)` and
+`GetMaterial(0)`, and keeps the import alive for the lifetime of the level.
+Every instance in every cell then uses the same Unity mesh and material.
+
+`PackageTextures` works the same way for images: `ViewerDownloadProvider`
+returns a 1×1 placeholder during import, then the cache replaces each material
+slot with a texture from `shared/textures`, deduplicated by file name, color
+space and sampler. Cached meshes, materials and textures are marked
+`HideFlags.DontUnloadUnusedAsset`: they are referenced only from managed code,
+so Unity's editor asset GC would otherwise unload them while the next cell or
+asset imports and leave materials with placeholders.
 
 ## Package smoke test
 
 The editor has a batch-mode test that loads the cell with the most authored
-LODs, instantiates every one of its LOD files, applies the shared textures and
-fails if any placeholder texture survives, if the LODs disagree on renderer
-count, or if a cell's bounds are outside the level or implausibly large for the
+LODs, instantiates every one of its LOD files, reserves and loads a sample of
+the shared assets referenced by its instances, applies the shared textures and
+fails if any placeholder texture survives, if a referenced asset is missing
+from the manifest or fails to load, if the LODs disagree on renderer count, or
+if cell/instance bounds are outside the level or implausibly large for the
 configured cell size (which catches broken node transforms):
 
 ```powershell

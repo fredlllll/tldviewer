@@ -14,6 +14,12 @@ namespace TldLevels.Viewer
     /// the camera is far enough away, and resolved to a LOD file listed in the
     /// manifest. The viewer never guesses which LODs exist on disk.
     /// </para>
+    /// <para>
+    /// Cell files only contain terrain, sky and oversized geometry. Trees,
+    /// houses and props are content-addressed assets in the shared library;
+    /// each cell loads its <c>instances.json</c> and the viewer instances those
+    /// shared meshes with a per-instance LOD.
+    /// </para>
     /// </summary>
     public sealed class PackageStreamer : MonoBehaviour
     {
@@ -32,8 +38,10 @@ namespace TldLevels.Viewer
 
         private PackageManifest manifest;
         private string packageDirectory;
+        private string sharedDirectory;
         private Transform container;
         private PackageTextures textures;
+        private PackageAssets assets;
         private ViewerDownloadProvider downloadProvider;
         private TimeBudgetPerFrameDeferAgent deferAgent;
         private readonly List<Cell> cells = new List<Cell>();
@@ -51,13 +59,15 @@ namespace TldLevels.Viewer
         public int PendingCount => wanted.Count;
         public long LoadedTriangles { get; private set; }
         public int TextureCount => textures != null ? textures.Count : 0;
+        public int AssetCount => assets != null ? assets.Count : 0;
+        public int LoadedAssetCount => assets != null ? assets.LoadedCount : 0;
 
         public Bounds FocusBounds => manifest != null ? manifest.GetFocusBounds() : new Bounds(Vector3.zero, Vector3.one * 100f);
 
         public string StatusLine =>
             running
                 ? $"{LevelName}: {LoadedCount}/{CellCount} cells, {PendingCount} queued, " +
-                  $"{LoadedTriangles:N0} tris, {TextureCount} shared texture(s)"
+                  $"{LoadedTriangles:N0} tris, {LoadedAssetCount}/{AssetCount} assets, {TextureCount} textures"
                 : "No package loaded.";
 
         public void Initialize(PackageManifest packageManifest, string directory)
@@ -66,7 +76,9 @@ namespace TldLevels.Viewer
 
             manifest = packageManifest;
             packageDirectory = directory;
-            textures = new PackageTextures(directory);
+            sharedDirectory = packageManifest.GetSharedDirectory(directory);
+            textures = new PackageTextures(Path.Combine(sharedDirectory, "textures"));
+            assets = new PackageAssets(sharedDirectory, packageManifest, textures);
             downloadProvider = new ViewerDownloadProvider();
             deferAgent = GetComponent<TimeBudgetPerFrameDeferAgent>();
             if (deferAgent == null)
@@ -121,10 +133,13 @@ namespace TldLevels.Viewer
                 container = null;
             }
 
+            assets?.Dispose();
+            assets = null;
             textures?.Dispose();
             textures = null;
             manifest = null;
             packageDirectory = null;
+            sharedDirectory = null;
         }
 
         private void OnDestroy()
@@ -190,6 +205,14 @@ namespace TldLevels.Viewer
                 }
             }
 
+            foreach (Cell cell in cells)
+            {
+                if (cell.State == CellState.Loaded)
+                {
+                    UpdateInstanceLods(cell, position);
+                }
+            }
+
             wanted.Sort((a, b) => a.PendingDistance.CompareTo(b.PendingDistance));
             nextLoadTime = 0f;
         }
@@ -231,55 +254,62 @@ namespace TldLevels.Viewer
             int loadGeneration = generation;
             cell.State = CellState.Loading;
 
-            PackageLodManifest lod = cell.Data.SelectLod(DesiredLod(cell.PendingDistance));
-            if (lod == null)
-            {
-                cell.State = CellState.Idle;
-                loading--;
-                return;
-            }
-
-            string path = Path.Combine(packageDirectory, lod.file.Replace('/', Path.DirectorySeparatorChar));
-            GltfImport import = null;
             GameObject root = null;
+            GltfImport import = null;
 
             try
             {
-                import = new GltfImport(downloadProvider, deferAgent);
-                if (!await import.LoadFile(path, new Uri(path)))
-                {
-                    throw new InvalidOperationException($"glTFast could not parse {lod.file}.");
-                }
-
-                if (loadGeneration != generation)
-                {
-                    import.Dispose();
-                    return;
-                }
-
                 root = new GameObject(cell.Data.id);
                 root.transform.SetParent(container, false);
-                if (!await import.InstantiateMainSceneAsync(root.transform))
+
+                PackageLodManifest lod = cell.Data.SelectLod(DesiredLod(cell.PendingDistance));
+                if (lod != null)
                 {
-                    throw new InvalidOperationException($"glTFast could not instantiate {lod.file}.");
+                    string path = Path.Combine(packageDirectory, lod.file.Replace('/', Path.DirectorySeparatorChar));
+                    import = new GltfImport(downloadProvider, deferAgent);
+                    if (!await import.LoadFile(path, new Uri(path)))
+                    {
+                        throw new InvalidOperationException($"glTFast could not parse {lod.file}.");
+                    }
+
+                    if (loadGeneration != generation)
+                    {
+                        import.Dispose();
+                        Destroy(root);
+                        return;
+                    }
+
+                    if (!await import.InstantiateMainSceneAsync(root.transform))
+                    {
+                        throw new InvalidOperationException($"glTFast could not instantiate {lod.file}.");
+                    }
+
+                    textures.Apply(import);
                 }
 
                 if (loadGeneration != generation)
                 {
+                    import?.Dispose();
                     Destroy(root);
-                    import.Dispose();
                     return;
                 }
 
-                textures.Apply(import);
+                cell.Instances.Clear();
+                long instanceTriangles = LoadInstances(cell, root);
                 cell.Root = root;
                 cell.Import = import;
-                cell.LoadedLod = lod.level;
+                cell.LoadedLod = lod?.level ?? -1;
                 cell.LoadedDistance = cell.PendingDistance;
-                cell.LoadedTriangles = lod.triangles;
+                cell.LoadedTriangles = (lod?.triangles ?? 0) + instanceTriangles;
                 cell.State = CellState.Loaded;
                 LoadedCount++;
-                LoadedTriangles += lod.triangles;
+                LoadedTriangles += cell.LoadedTriangles;
+
+                Camera camera = Camera.main;
+                if (camera != null)
+                {
+                    UpdateInstanceLods(cell, camera.transform.position);
+                }
             }
             catch (Exception exception)
             {
@@ -289,6 +319,9 @@ namespace TldLevels.Viewer
                 }
 
                 import?.Dispose();
+                cell.Root = null;
+                cell.Import = null;
+                cell.Instances.Clear();
                 cell.State = CellState.Idle;
                 cell.NextRetryTime = Time.unscaledTime + 5f;
                 Debug.LogWarning($"[PackageStreamer] {cell.Data.id}: {exception.Message}");
@@ -297,6 +330,154 @@ namespace TldLevels.Viewer
             {
                 loading = Mathf.Max(0, loading - 1);
             }
+        }
+
+        /// <summary>
+        /// Creates the empty instance roots for a cell. Assets are filled in as
+        /// soon as they have loaded, so terrain is visible immediately.
+        /// </summary>
+        private long LoadInstances(Cell cell, GameObject cellRoot)
+        {
+            if (string.IsNullOrEmpty(cell.Data.instances))
+            {
+                return 0;
+            }
+
+            string path = Path.Combine(
+                packageDirectory,
+                cell.Data.instances.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(path))
+            {
+                Debug.LogWarning($"[PackageStreamer] {cell.Data.id}: missing {cell.Data.instances}");
+                return 0;
+            }
+
+            PackageInstancesFile file;
+            try
+            {
+                file = JsonUtility.FromJson<PackageInstancesFile>(File.ReadAllText(path));
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning($"[PackageStreamer] {cell.Data.id}: {exception.Message}");
+                return 0;
+            }
+
+            long triangles = 0;
+            if (file?.instances == null)
+            {
+                return 0;
+            }
+
+            foreach (PackageInstance data in file.instances)
+            {
+                if (data == null)
+                {
+                    continue;
+                }
+
+                GameObject root = new GameObject(string.IsNullOrEmpty(data.name) ? "instance" : data.name);
+                root.transform.SetParent(cellRoot.transform, false);
+                root.transform.localPosition = data.UnityPosition;
+                root.transform.localRotation = data.UnityRotation;
+                root.transform.localScale = data.UnityScale;
+
+                PackageInstanceLod lod0 = data.SelectLod(0);
+                if (lod0 != null)
+                {
+                    triangles += lod0.triangles;
+                }
+
+                cell.Instances.Add(new InstanceRuntime
+                {
+                    Data = data,
+                    Root = root,
+                    Position = root.transform.position,
+                });
+            }
+
+            return triangles;
+        }
+
+        private void UpdateInstanceLods(Cell cell, Vector3 cameraPosition)
+        {
+            foreach (InstanceRuntime instance in cell.Instances)
+            {
+                float distance = Vector3.Distance(cameraPosition, instance.Position);
+                int desired = DesiredLod(distance);
+                PackageInstanceLod variant = instance.Data.SelectLod(desired);
+                if (variant == null || variant.level == instance.AppliedLevel)
+                {
+                    continue;
+                }
+
+                if (!TryApplyVariant(instance, variant))
+                {
+                    continue;
+                }
+
+                instance.AppliedLevel = variant.level;
+            }
+        }
+
+        /// <summary>
+        /// Requests every asset of a variant and swaps the instance children
+        /// once all of them are resident. Returns false while assets are still
+        /// loading, leaving the previous LOD visible instead of popping empty.
+        /// </summary>
+        private bool TryApplyVariant(InstanceRuntime instance, PackageInstanceLod variant)
+        {
+            if (variant.assets == null || variant.assets.Length == 0)
+            {
+                return false;
+            }
+
+            PackageAsset[] loaded = new PackageAsset[variant.assets.Length];
+            for (int i = 0; i < variant.assets.Length; i++)
+            {
+                string id = variant.assets[i];
+                PackageAsset asset = assets.Get(id);
+                if (asset == null)
+                {
+                    assets.Request(id);
+                    return false;
+                }
+
+                loaded[i] = asset;
+            }
+
+            while (instance.Children.Count > loaded.Length)
+            {
+                int last = instance.Children.Count - 1;
+                Destroy(instance.Children[last]);
+                instance.Children.RemoveAt(last);
+            }
+
+            for (int i = 0; i < loaded.Length; i++)
+            {
+                GameObject child;
+                if (i < instance.Children.Count)
+                {
+                    child = instance.Children[i];
+                }
+                else
+                {
+                    child = new GameObject($"{instance.Data.name}_{i}");
+                    child.transform.SetParent(instance.Root.transform, false);
+                    child.AddComponent<MeshFilter>();
+                    child.AddComponent<MeshRenderer>();
+                    instance.Children.Add(child);
+                }
+
+                child.SetActive(true);
+                child.GetComponent<MeshFilter>().sharedMesh = loaded[i].Mesh;
+
+                MeshRenderer renderer = child.GetComponent<MeshRenderer>();
+                renderer.sharedMaterial = loaded[i].Material;
+                renderer.enabled = true;
+            }
+
+            return true;
         }
 
         private void ReleaseCell(Cell cell)
@@ -319,6 +500,7 @@ namespace TldLevels.Viewer
             cell.Import?.Dispose();
             cell.Root = null;
             cell.Import = null;
+            cell.Instances.Clear();
             cell.LoadedLod = -1;
             cell.LoadedDistance = 0f;
             cell.LoadedTriangles = 0;
@@ -344,6 +526,16 @@ namespace TldLevels.Viewer
             public long LoadedTriangles;
             public float PendingDistance;
             public float NextRetryTime;
+            public readonly List<InstanceRuntime> Instances = new List<InstanceRuntime>();
+        }
+
+        private sealed class InstanceRuntime
+        {
+            public PackageInstance Data;
+            public GameObject Root;
+            public Vector3 Position;
+            public int AppliedLevel = -1;
+            public readonly List<GameObject> Children = new List<GameObject>();
         }
     }
 }

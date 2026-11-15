@@ -31,8 +31,8 @@ vendor/AssetRipper/       git submodule, tag 2.0.0
 
 Generated files are written **outside the repository**, by default to
 `\\VBoxSvr\TLDLevels\tldlevels\levels` (`levelN.glb`, `levelN.png`,
-`levelN.viewer/`, `manifest.json`, `manifest.csv`, `export.log`). Use `--output`
-to change that.
+`levelN.viewer/`, `shared/`, `manifest.json`, `manifest.csv`, `export.log`).
+Use `--output` to change that.
 
 ## Viewer
 
@@ -88,7 +88,7 @@ dotnet run --project src\TldLevels.Exporter -c Release -- --levels 1-10 --viewer
 --merge-overlays <bool>  add the preceding art scene to design-level exports  default: true
 --no-merge-overlays      export each level file on its own
 --all-lods               keep LOD1/LOD2/etc. in GLB exports (default: LOD0 only)
---viewer-package         write level.viewer cell packages instead of GLBs
+--viewer-package         write level.viewer packages (shared assets + cells)
 --cell-size <m>          viewer package cell edge length   default: 256
 --merge-scene <a=b>      export scene a with base scene b (repeatable)
 --preview <bool>         render a top-down PNG            default: true
@@ -107,7 +107,7 @@ Exit codes: `0` success, `1` bad arguments / nothing to do, `2` some levels fail
 Every level is its own checkpoint:
 
 - a GLB is written as `<level>.glb.part` and only moved into place on success, so a kill never leaves a truncated `.glb`;
-- a viewer package is built as `<level>.viewer.part` and only moved into place after all cells, textures and the manifest are written;
+- a viewer package is built as `<level>.viewer.part` and only moved into place after all cells, instance files and the manifest are written; shared assets are content-addressed and written independently, so a crash never leaves a half-written asset that the next run would trust;
 - previews use `<level>.png.part.png` the same way;
 - `manifest.json` is rewritten after every completed level;
 - design variants are recognised from the manifest's `mergeVersion`/`includes`, so a resumed run does not rebuild them (and an old manifest triggers one re-export to repair the previous merge direction);
@@ -137,40 +137,68 @@ scene.
 ## Viewer packages
 
 `--viewer-package` replaces the single GLB with a streamed package built in one
-pass per level:
+pass per level. Terrain, sky shells, distant backdrop and oversized meshes stay
+in the cell files; trees, houses, props and all of their authored LODs are
+written once to a shared library at the output root:
 
 ```
-level1.viewer/
-  manifest.json          format version, cells, bounds, LOD list, per-cell files
-  materials.json         material names used by the level
-  textures/              unique textures, named by SHA-256 content hash
-  cells/x-1_z0/lod0.gltf
-  cells/x-1_z0/lod0.bin
-  cells/x-1_z0/lod1.gltf  (only for cells whose objects provide a coarser LOD)
-  cells/x-1_z0/lod1.bin
+<output>/
+  shared/
+    assets/<id>.gltf        one mesh + one material per file
+    assets/<id>.bin
+    textures/<sha256>.png   unique textures, shared by every level
+  level1.viewer/
+    manifest.json           format version 2, shared root, assets and cells
+    materials.json          material names used by the level
+    cells/x-1_z0/lod0.gltf
+    cells/x-1_z0/lod0.bin
+    cells/x-1_z0/lod1.gltf  (only for cells whose objects provide a coarser LOD)
+    cells/x-1_z0/instances.json
+  level118.viewer/
+    ...
 ```
 
-- Static meshes are split by triangle centroid onto a configurable grid
-  (`--cell-size`, default 256 m). Terrain is split on the same grid.
-- Cells reference shared textures with relative paths
-  (`../../textures/<hash>.png`), so a texture is stored once per level rather
-  than embedded in every cell.
+- Static cell-local meshes are split by triangle centroid onto a configurable
+  grid (`--cell-size`, default 256 m). Terrain is split on the same grid.
+- Every shared asset is content-addressed: its 128-bit id hashes the primitive
+  geometry plus the material parameters and texture bytes. Identical props,
+  trees and materials therefore resolve to the same file across levels, and a
+  re-export skips assets that already exist instead of rewriting them.
+- Shared textures are stored by SHA-256 prefix, so a texture used by a hundred
+  assets and several levels still exists only once. Cells reference them as
+  `../../../shared/textures/<name>`, assets as `../textures/<name>`.
+- Instances are assigned to one cell by their world-bounds centre. A cell's
+  `instances.json` stores each transform and the asset ids for every authored
+  LOD, so the viewer chooses a LOD per instance rather than per cell. The
+  manifest lists every available asset and LOD file; the viewer never probes
+  the file system or generates content.
 - Package mode always keeps the authored Unity LODs (`LOD1`, `LOD2`, …),
-  independent of `--all-lods`. `manifest.json` lists exactly which LOD files
-  exist, so the viewer never probes the file system or generates anything on
-  demand; a level whose objects only provide `_LOD0` stays at one LOD.
-- Every written LOD file is a complete snapshot of its cell. Objects that have
-  no authored LOD at or below the requested level (terrain, LOD0-only props)
-  fall back to their closest authored LOD instead of disappearing, so switching
-  cells to a coarser level never drops geometry.
+  independent of `--all-lods`. Cell-local geometry falls back to its closest
+  authored LOD so a coarser cell file never drops terrain or LOD0-only objects.
 - `focusMin`/`focusMax` cover the `TerrainDefault` triangles (the playable
   ground), so the viewer can frame the level without the sky shell and distant
   backdrop dominating the bounds.
 - Package mode does not also write `levelN.glb`. Run without
   `--viewer-package` if you need the whole-level debug GLB.
 
-The Unity viewer streams cells nearest-first, keeps them inside a radius and
-selects a LOD per cell from the manifest at distance. See the
+Measured with the shared library (`--cell-size 256`, authored LODs):
+
+| Level | Package | Shared assets | Shared textures | Instances | Cells / LODs | Package build |
+|---|---:|---:|---:|---:|---:|---:|
+| `level1` | 4.1 MB | 15.9 MB (747) | 157.1 MB (74) | 585 | 344 / 3 | 60 s |
+| `level111` | 53.6 MB | 68.5 MB (4,991) | 194.8 MB (154) | 19,062 | 701 / 4 | 240 s |
+| `level118` | 47.0 MB | 110.6 MB (7,007) | 276.6 MB (216 new) | 11,401 | 668 / 5 | 226 s |
+
+For comparison, the previous per-cell layout produced a 205.3 MB `level1`
+package (48.0 MB of cells), 726.4 MB for `level111` after per-cell mesh dedup
+(1,615.5 MB before) and 914.6 MB for `level118`. Exporting `level118` into the
+same output root as `level1` reused 17 assets and added 216 textures to the
+existing 74; 214 of `level118`'s asset ids also match `level111`, so a combined
+export stores those once. Caching each material fingerprint and skipping already-written
+assets cut `level111`'s first export from 1,332 s to 240 s.
+
+The Unity viewer streams cells nearest-first, keeps them inside a radius,
+instances the shared meshes and selects a LOD per instance at distance. See the
 [viewer README](src/TldLevels.Viewer/README.md).
 
 ## Notes
