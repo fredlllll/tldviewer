@@ -87,7 +87,7 @@ dotnet run --project src\TldLevels.Exporter -c Release -- --levels 1-10 --viewer
 --validate <bool>        inspect each GLB after writing   default: true
 --merge-overlays <bool>  add the preceding art scene to design-level exports  default: true
 --no-merge-overlays      export each level file on its own
---all-lods               keep LOD1/LOD2/etc. meshes (default: LOD0 only)
+--all-lods               keep LOD1/LOD2/etc. in GLB exports (default: LOD0 only)
 --viewer-package         write level.viewer cell packages instead of GLBs
 --cell-size <m>          viewer package cell edge length   default: 256
 --merge-scene <a=b>      export scene a with base scene b (repeatable)
@@ -146,6 +146,8 @@ level1.viewer/
   textures/              unique textures, named by SHA-256 content hash
   cells/x-1_z0/lod0.gltf
   cells/x-1_z0/lod0.bin
+  cells/x-1_z0/lod1.gltf  (only for cells whose objects provide a coarser LOD)
+  cells/x-1_z0/lod1.bin
 ```
 
 - Static meshes are split by triangle centroid onto a configurable grid
@@ -153,10 +155,14 @@ level1.viewer/
 - Cells reference shared textures with relative paths
   (`../../textures/<hash>.png`), so a texture is stored once per level rather
   than embedded in every cell.
-- `manifest.json` lists exactly which LOD files exist, so the viewer never
-  probes the file system or generates anything on demand. Package mode keeps
-  authored LODs when the scene provides them; scenes with only `_LOD0` produce a
-  single LOD.
+- Package mode always keeps the authored Unity LODs (`LOD1`, `LOD2`, …),
+  independent of `--all-lods`. `manifest.json` lists exactly which LOD files
+  exist, so the viewer never probes the file system or generates anything on
+  demand; a level whose objects only provide `_LOD0` stays at one LOD.
+- Every written LOD file is a complete snapshot of its cell. Objects that have
+  no authored LOD at or below the requested level (terrain, LOD0-only props)
+  fall back to their closest authored LOD instead of disappearing, so switching
+  cells to a coarser level never drops geometry.
 - `focusMin`/`focusMax` cover the `TerrainDefault` triangles (the playable
   ground), so the viewer can frame the level without the sky shell and distant
   backdrop dominating the bounds.
@@ -164,7 +170,7 @@ level1.viewer/
   `--viewer-package` if you need the whole-level debug GLB.
 
 The Unity viewer streams cells nearest-first, keeps them inside a radius and
-selects a LOD from the manifest at distance. See the
+selects a LOD per cell from the manifest at distance. See the
 [viewer README](src/TldLevels.Viewer/README.md).
 
 ## Notes

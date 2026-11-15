@@ -5,17 +5,25 @@
 | Repository | https://github.com/AssetRipper/AssetRipper |
 | Path | `vendor/AssetRipper` |
 | Tag | `2.0.0` |
-| Commit | `1ac666f47d8e9dedf96afb0b914c70d7656151ea` |
+| Upstream commit | `1ac666f47d8e9dedf96afb0b914c70d7656151ea` |
+| Local tip | `1ef5f5d` (detached) |
 
-The submodule is **unmodified**. No local patches are applied.
+The submodule starts from the 2.0.0 tag and carries a small set of local commits
+on top of it. They are part of this repository's pin, not a patch queue applied
+at build time:
 
-To reproduce the pin from a fresh clone:
+- duplicate-placement filtering experiments (`d317fef` and earlier);
+- vertex colour tweak for rock cliff 09 (`5d8d346`);
+- expose scene draw meshes for viewer packages (`9d6e68f`);
+- honour the caller's `includeAllLods` flag when collecting draw meshes
+  (`1ef5f5d`): `ShouldSkipForVisualization` read the static `IncludeAllLods`
+  property, which only `SceneGlbExporter` sets, so package exports dropped every
+  `_LOD1+` object before the LOD logic saw it.
 
-```powershell
-git submodule update --init --recursive
-git -C vendor/AssetRipper checkout --detach 1ac666f47d8e9dedf96afb0b914c70d7656151ea
-```
+The main repository pins the submodule commit; `git submodule update --init
+--recursive` followed by the checkout recorded by `git ls-tree HEAD
+vendor/AssetRipper` reproduces the exact tree.
 
-If AssetRipper ever needs a local change, add it as a patch file in this
-directory (`NNNN-short-name.patch`) and document it here, rather than editing
-files inside the submodule.
+New local changes should be committed inside `vendor/AssetRipper` (as above) and
+the updated pointer committed here, rather than editing files and leaving the
+submodule dirty.

@@ -165,7 +165,7 @@ public sealed class Options
 		  --no-preview             Same as --preview false
 		  --merge-overlays <bool>  Merge prop-only design scenes into their art scene  default: true
 		  --no-merge-overlays      Export each level file on its own instead
-		  --all-lods               Keep LOD1/LOD2/etc. meshes (default: LOD0 only)
+		  --all-lods               Keep LOD1/LOD2/etc. in GLB exports (default: LOD0 only)
 		  --viewer-package         Write level.viewer packages (cells + shared textures)
 		  --cell-size <m>          Viewer package cell edge length  default: 256
 		  --merge-scene <a=b>      Export scene a with base scene b (repeatable)

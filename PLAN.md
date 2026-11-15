@@ -262,6 +262,8 @@ levelN.viewer/
   textures/              unique textures, named by SHA-256 content hash
   cells/x-1_z0/lod0.gltf
   cells/x-1_z0/lod0.bin
+  cells/x-1_z0/lod1.gltf  (cells whose objects provide a coarser authored LOD)
+  cells/x-1_z0/lod1.bin
 ```
 
 - Static meshes are split by triangle centroid on a fixed X/Z grid; Unity
@@ -269,11 +271,26 @@ levelN.viewer/
   triangles actually occupy, not in every cell its AABB overlaps.
 - Cells reference shared textures with relative paths
   (`../../textures/<hash>.png`), so each unique texture is stored once per level.
-- The manifest is the only source of truth for available LODs; the viewer never
-  probes the file system.
+- Package mode always keeps authored Unity LODs (`LOD1`, `LOD2`, …), independent
+  of `--all-lods` (which only affects GLB exports). Authored LOD objects live in
+  the same scene with a `_LODn` suffix and the same transform, so the exporter
+  pairs them by stripped name and transform.
+- The viewer selects a LOD per cell from the manifest; the manifest is the only
+  source of truth and the viewer never probes the file system. A level whose
+  scene only provides `_LOD0` stays at one LOD.
+- Every written LOD is a complete cell snapshot. Authored LOD files only contain
+  the objects that have that level, so terrain and LOD0-only props would vanish
+  on switch; each object instead falls back to its highest authored LOD at or
+  below the requested level (or its lowest authored LOD when it has none), and
+  the manifest reports the triangles actually written per LOD file.
 - `focusMin`/`focusMax` come from the `TerrainDefault` triangles, falling back
   to the overall mesh bounds for interiors, and drive viewer framing.
 - Package mode does not also write `levelN.glb`.
+
+The shared texture cache in the viewer owns its textures and marks them
+`HideFlags.DontUnloadUnusedAsset`. They are referenced only from managed code,
+so Unity's editor asset GC would otherwise destroy them while the next cell or
+LOD imports and leave that cell's materials with glTFast's 1×1 placeholders.
 
 Draw mesh transforms are world matrices from AssetRipper's scene traversal.
 SharpGLTF's SRT constructor is `AffineTransform(scale, rotation, translation)`;

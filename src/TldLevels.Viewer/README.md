@@ -52,10 +52,12 @@ level1.viewer/
 - Cells reference textures with relative paths (`../../textures/<hash>.png`),
   so each unique texture exists once per level instead of once per cell.
 - `manifest.json` is the only source of truth for which LOD levels exist; the
-  viewer selects the nearest listed LOD and never checks the file system for
-  optional levels.
-- The exporter writes authored LODs when they are present in the scene. Levels
-  whose scene only contains `_LOD0` produce a single LOD, which is expected.
+  viewer picks a LOD per cell from the manifest and never checks the file system
+  for optional levels.
+- The exporter always keeps the authored Unity LODs (`LOD1`, `LOD2`, …). Each
+  written LOD file is a complete snapshot of its cell: objects without a
+  matching authored LOD (terrain, `_LOD0`-only props) fall back to their closest
+  level, so switching to a coarser LOD never removes geometry.
 
 ## Shared texture cache
 
@@ -64,15 +66,18 @@ glTFast normally decodes every texture referenced by every cell. For packages,
 `PackageTextures` then replaces each material slot with a texture from the
 per-level cache, deduplicated by hash file name, color space and sampler. This
 keeps runtime texture memory proportional to the level, not to the number of
-loaded cells.
+loaded cells. The cache marks its textures `HideFlags.DontUnloadUnusedAsset`:
+they are referenced only from managed code, so Unity's editor asset GC would
+otherwise unload them while the next cell or LOD is imported and leave its
+materials with placeholders.
 
 ## Package smoke test
 
-The editor has a batch-mode test that loads the largest cell of a package,
-instantiates it, applies the shared textures and fails if any placeholder
-texture survives or if the cell's renderer bounds are outside the level or
-implausibly large for the configured cell size (which catches broken node
-transforms):
+The editor has a batch-mode test that loads the cell with the most authored
+LODs, instantiates every one of its LOD files, applies the shared textures and
+fails if any placeholder texture survives, if the LODs disagree on renderer
+count, or if a cell's bounds are outside the level or implausibly large for the
+configured cell size (which catches broken node transforms):
 
 ```powershell
 Unity.exe -batchmode -nographics `

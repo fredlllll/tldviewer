@@ -7,8 +7,8 @@ using UnityEditor;
 using UnityEngine;
 
 /// <summary>
-/// Batch-mode smoke test for the streamed viewer package path and the shared
-/// texture cache. Run with:
+/// Batch-mode smoke test for the streamed viewer package path, shared texture
+/// cache and per-LOD cell completeness. Run with:
 /// <c>Unity.exe -batchmode -nographics -projectPath src/TldLevels.Viewer
 /// -executeMethod PackageSmokeTest.Run -logFile smoke.log</c>
 /// </summary>
@@ -48,9 +48,7 @@ public static class PackageSmokeTest
     private static async Task RunAsync()
     {
         int exitCode = 1;
-        GameObject root = null;
         PackageTextures textures = null;
-        GltfImport import = null;
         try
         {
             string package = Environment.GetEnvironmentVariable("TLD_SMOKE_PACKAGE");
@@ -68,47 +66,114 @@ public static class PackageSmokeTest
             Debug.Log($"[smoke] manifest: {manifest.level}, {manifest.cells.Length} cells, " +
                 $"{manifest.lodCount} LOD(s), focus {focus.center} size {focus.size}");
 
+            // Prefer the cell with the most authored LODs: that is the case where
+            // incomplete LOD files (missing terrain or LOD0-only props) show up.
             PackageCellManifest cell = null;
-            PackageLodManifest lod = null;
             long bestTriangles = -1;
             foreach (PackageCellManifest candidate in manifest.cells)
             {
                 PackageLodManifest candidateLod = candidate.SelectLod(0);
-                if (candidateLod != null && candidateLod.triangles > bestTriangles)
+                if (candidateLod == null)
+                {
+                    continue;
+                }
+
+                int candidateLods = candidate.lods == null ? 0 : candidate.lods.Length;
+                int bestLods = cell?.lods == null ? 0 : cell.lods.Length;
+                if (cell == null || candidateLods > bestLods
+                    || candidateLods == bestLods && candidateLod.triangles > bestTriangles)
                 {
                     bestTriangles = candidateLod.triangles;
                     cell = candidate;
-                    lod = candidateLod;
                 }
             }
 
-            if (cell == null || lod == null)
+            if (cell == null)
             {
                 throw new InvalidOperationException("No cell with an available LOD.");
             }
 
-            string path = Path.Combine(package, lod.file.Replace('/', Path.DirectorySeparatorChar));
-            Debug.Log($"[smoke] loading {cell.id} lod{lod.level} ({lod.triangles:N0} tris) from {path}");
+            // A cell holds geometry near its own grid position. A transform that
+            // swaps scale and translation (or otherwise explodes) shows up here
+            // long before anyone notices in the renderer.
+            Bounds world = manifest.GetWorldBounds();
+            Bounds allowed = new Bounds(world.center, world.size + Vector3.one * manifest.cellSize * 2f);
 
             textures = new PackageTextures(package);
+            int expectedRenderers = -1;
+            foreach (PackageLodManifest lod in cell.lods)
+            {
+                LodResult result = await LoadLodAsync(package, textures, cell, lod, allowed, manifest.cellSize);
+                Debug.Log($"[smoke] {cell.id} lod{lod.level}: {result.Renderers} renderers, " +
+                    $"{result.MaterialSlots} material slots, {result.BaseTextured} shared base textures, " +
+                    $"{result.Placeholders} placeholders, {lod.triangles:N0} tris, bounds {result.Bounds}");
+
+                if (expectedRenderers < 0)
+                {
+                    expectedRenderers = result.Renderers;
+                    if (result.MaterialSlots == 0 || result.BaseTextured == 0)
+                    {
+                        throw new InvalidOperationException("Cell loaded but shared textures were not applied.");
+                    }
+                }
+                else if (result.Renderers != expectedRenderers)
+                {
+                    throw new InvalidOperationException(
+                        $"lod{lod.level} has {result.Renderers} renderers, lod{cell.lods[0].level} has {expectedRenderers}: " +
+                        "the cell LOD is missing LOD0-only geometry.");
+                }
+
+                if (result.Placeholders != 0)
+                {
+                    throw new InvalidOperationException($"lod{lod.level} still uses placeholder textures.");
+                }
+            }
+
+            Debug.Log($"[smoke] {textures.Count} cached textures across {cell.lods.Length} LOD(s)");
+            exitCode = 0;
+            Debug.Log("[smoke] PASS");
+        }
+        catch (Exception exception)
+        {
+            Debug.LogError($"[smoke] FAIL: {exception}");
+        }
+        finally
+        {
+            textures?.Dispose();
+            EditorApplication.update -= Watchdog;
+            EditorApplication.Exit(exitCode);
+        }
+    }
+
+    private static async Task<LodResult> LoadLodAsync(
+        string package,
+        PackageTextures textures,
+        PackageCellManifest cell,
+        PackageLodManifest lod,
+        Bounds allowed,
+        float cellSize)
+    {
+        string path = Path.Combine(package, lod.file.Replace('/', Path.DirectorySeparatorChar));
+        GameObject root = null;
+        GltfImport import = null;
+        try
+        {
             import = new GltfImport(new ViewerDownloadProvider(), new UninterruptedDeferAgent());
             if (!await import.LoadFile(path, new Uri(path)))
             {
-                throw new InvalidOperationException("glTFast failed to load the cell.");
+                throw new InvalidOperationException($"glTFast failed to load {path}.");
             }
 
             root = new GameObject("SmokeCell");
             if (!await import.InstantiateMainSceneAsync(root.transform))
             {
-                throw new InvalidOperationException("glTFast failed to instantiate the cell.");
+                throw new InvalidOperationException($"glTFast failed to instantiate {path}.");
             }
 
             textures.Apply(import);
 
             Renderer[] renderers = root.GetComponentsInChildren<Renderer>();
-            int materialSlots = 0;
-            int baseTextured = 0;
-            int placeholderTextures = 0;
+            LodResult result = new LodResult { Renderers = renderers.Length };
             foreach (Renderer renderer in renderers)
             {
                 foreach (Material material in renderer.sharedMaterials)
@@ -118,7 +183,7 @@ public static class PackageSmokeTest
                         continue;
                     }
 
-                    materialSlots++;
+                    result.MaterialSlots++;
                     if (!material.HasProperty("baseColorTexture"))
                     {
                         continue;
@@ -132,51 +197,35 @@ public static class PackageSmokeTest
 
                     if (texture.width == 1 && texture.height == 1)
                     {
-                        placeholderTextures++;
+                        result.Placeholders++;
                     }
                     else
                     {
-                        baseTextured++;
+                        result.BaseTextured++;
                     }
                 }
             }
 
-            Debug.Log($"[smoke] cell instantiated: {renderers.Length} renderers, {materialSlots} material slots, " +
-                $"{baseTextured} shared base textures, {placeholderTextures} placeholders, " +
-                $"{textures.Count} cached textures");
-            Bounds bounds = GetBounds(root);
-            Debug.Log($"[smoke] bounds: {bounds}");
-
-            if (renderers.Length == 0 || materialSlots == 0 || textures.Count == 0 || baseTextured == 0)
+            result.Bounds = GetBounds(root);
+            if (renderers.Length == 0)
             {
-                throw new InvalidOperationException("Cell loaded but shared textures were not applied.");
+                throw new InvalidOperationException($"{path} contains no renderers.");
             }
 
-            // A cell holds geometry near its own grid position. A transform that
-            // swaps scale and translation (or otherwise explodes) shows up here
-            // long before anyone notices in the renderer.
-            Bounds world = manifest.GetWorldBounds();
-            float margin = manifest.cellSize;
-            Bounds allowed = new Bounds(world.center, world.size + Vector3.one * margin * 2f);
-            if (!allowed.Contains(bounds.center))
+            if (!allowed.Contains(result.Bounds.center))
             {
                 throw new InvalidOperationException(
-                    $"Cell bounds center {bounds.center} is outside the level bounds {world}.");
+                    $"{path} bounds center {result.Bounds.center} is outside the level bounds {allowed}.");
             }
 
-            float extent = Mathf.Max(bounds.size.x, Mathf.Max(bounds.size.y, bounds.size.z));
-            if (extent > manifest.cellSize * 8f)
+            float extent = Mathf.Max(result.Bounds.size.x, Mathf.Max(result.Bounds.size.y, result.Bounds.size.z));
+            if (extent > Mathf.Max(cellSize, 1f) * 8f)
             {
                 throw new InvalidOperationException(
-                    $"Cell bounds {bounds.size} are implausibly large for a {manifest.cellSize} m grid.");
+                    $"{path} bounds {result.Bounds.size} are implausibly large for the grid.");
             }
 
-            exitCode = 0;
-            Debug.Log("[smoke] PASS");
-        }
-        catch (Exception exception)
-        {
-            Debug.LogError($"[smoke] FAIL: {exception}");
+            return result;
         }
         finally
         {
@@ -186,9 +235,6 @@ public static class PackageSmokeTest
             }
 
             import?.Dispose();
-            textures?.Dispose();
-            EditorApplication.update -= Watchdog;
-            EditorApplication.Exit(exitCode);
         }
     }
 
@@ -207,5 +253,14 @@ public static class PackageSmokeTest
         }
 
         return bounds;
+    }
+
+    private sealed class LodResult
+    {
+        public int Renderers;
+        public int MaterialSlots;
+        public int BaseTextured;
+        public int Placeholders;
+        public Bounds Bounds;
     }
 }

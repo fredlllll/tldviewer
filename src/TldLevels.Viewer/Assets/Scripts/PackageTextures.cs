@@ -131,7 +131,7 @@ namespace TldLevels.Viewer
             TextureWrapMode wrapU = sampler?.WrapU ?? TextureWrapMode.Repeat;
             TextureWrapMode wrapV = sampler?.WrapV ?? TextureWrapMode.Repeat;
             string key = $"{fileName}|{(linear ? "L" : "S")}|{(int)filter}|{(int)wrapU}|{(int)wrapV}";
-            if (textures.TryGetValue(key, out Texture2D cached))
+            if (textures.TryGetValue(key, out Texture2D cached) && cached != null)
             {
                 return cached;
             }
@@ -142,9 +142,15 @@ namespace TldLevels.Viewer
                 return null;
             }
 
+            // Shared cell materials must outlive any single cell, so the cache
+            // owns these textures instead of the glTF import. Unity's editor
+            // asset GC does not know about plain managed references and would
+            // otherwise unload them while the next cell (or LOD) loads, leaving
+            // that cell with 1x1 placeholder textures.
             Texture2D texture = new Texture2D(2, 2, TextureFormat.RGBA32, true, linear)
             {
                 name = fileName,
+                hideFlags = HideFlags.DontUnloadUnusedAsset,
                 filterMode = filter,
                 wrapModeU = wrapU,
                 wrapModeV = wrapV,
@@ -156,7 +162,7 @@ namespace TldLevels.Viewer
                 return null;
             }
 
-            textures.Add(key, texture);
+            textures[key] = texture;
             return texture;
         }
 

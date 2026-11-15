@@ -83,18 +83,18 @@ public static class ViewerPackageExporter
 				ref focusMax);
 		}
 
-		Dictionary<int, long> bytesByLod = [];
 		int skippedNodes = 0;
 		foreach (PackageCell cell in cells.Values)
 		{
 			string cellDirectory = Path.Combine(tempDirectory, CellsFolder, cell.Id);
 			Directory.CreateDirectory(cellDirectory);
 
-			foreach ((int lod, CellLod cellLod) in cell.Lods.OrderBy(pair => pair.Key))
+			foreach (int lod in cell.Lods.Keys.OrderBy(value => value))
 			{
 				string fileName = $"lod{lod}.gltf";
 				string path = Path.Combine(cellDirectory, fileName);
-				skippedNodes += WriteCellLod(path, cellLod, textureDirectory);
+				skippedNodes += WriteCellLod(path, cell, lod, textureDirectory, out long writtenTriangles);
+				cell.WrittenTriangles[lod] = writtenTriangles;
 			}
 		}
 
@@ -200,6 +200,7 @@ public static class ViewerPackageExporter
 				CellLod cellLod = cell.GetOrCreateLod(drawMesh.Lod);
 				MeshEntry entry = cellLod.GetOrCreateEntry(drawIndex, primitive.VertexType, drawMesh);
 				entry.GetPrimitive(material, va).AddTriangle(va, vb, vc);
+				entry.Triangles++;
 				cellLod.Triangles++;
 				triangles++;
 			}
@@ -208,11 +209,12 @@ public static class ViewerPackageExporter
 		return triangles;
 	}
 
-	private static int WriteCellLod(string path, CellLod cellLod, string textureDirectory)
+	private static int WriteCellLod(string path, PackageCell cell, int lod, string textureDirectory, out long triangles)
 	{
 		SceneBuilder scene = new();
 		int skipped = 0;
-		foreach (MeshEntry entry in cellLod.Entries)
+		triangles = 0;
+		foreach (MeshEntry entry in cell.SelectEntries(lod))
 		{
 			if (!TryCreateTransform(entry.WorldMatrix, out AffineTransform transform, out string reason))
 			{
@@ -226,6 +228,7 @@ public static class ViewerPackageExporter
 				LocalTransform = transform,
 			};
 			scene.AddRigidMesh(entry.Mesh, node);
+			triangles += entry.Triangles;
 		}
 
 		ModelRoot model = scene.ToGltf2();
@@ -401,13 +404,14 @@ public static class ViewerPackageExporter
 					max = ToArray(cell.Max),
 					center = ToArray((cell.Min + cell.Max) * 0.5f),
 					lods = cell.Lods
-						.OrderBy(pair => pair.Key)
-						.Select(pair => new
+						.Keys
+						.OrderBy(lod => lod)
+						.Select(lod => new
 						{
-							level = pair.Key,
-							file = $"{CellsFolder}/{cell.Id}/lod{pair.Key}.gltf",
-							triangles = pair.Value.Triangles,
-							bytes = new FileInfo(Path.Combine(Path.GetDirectoryName(path)!, CellsFolder, cell.Id, $"lod{pair.Key}.gltf")).Length,
+							level = lod,
+							file = $"{CellsFolder}/{cell.Id}/lod{lod}.gltf",
+							triangles = cell.WrittenTriangles[lod],
+							bytes = new FileInfo(Path.Combine(Path.GetDirectoryName(path)!, CellsFolder, cell.Id, $"lod{lod}.gltf")).Length,
 						}),
 				}),
 		};
@@ -437,11 +441,83 @@ public static class ViewerPackageExporter
 
 		public Dictionary<int, CellLod> Lods { get; } = [];
 
+		public Dictionary<int, long> WrittenTriangles { get; } = [];
+
 		public void Include(Vector3 a, Vector3 b, Vector3 c)
 		{
 			Min = Vector3.Min(Min, Vector3.Min(a, Vector3.Min(b, c)));
 			Max = Vector3.Max(Max, Vector3.Max(a, Vector3.Max(b, c)));
 		}
+
+		/// <summary>
+		/// Entries for one written LOD file. Authored LOD files only contain the
+		/// objects that actually have that LOD, so terrain and LOD0-only props
+		/// would vanish when the viewer switches a cell to a coarser level. Every
+		/// object therefore falls back to its highest authored LOD at or below the
+		/// requested level (or its lowest authored LOD when it has none below).
+		/// </summary>
+		public IEnumerable<MeshEntry> SelectEntries(int lod)
+		{
+			Dictionary<(string Name, string Matrix), SortedDictionary<int, List<MeshEntry>>> objects = [];
+			foreach ((int authoredLod, CellLod cellLod) in Lods)
+			{
+				foreach (MeshEntry entry in cellLod.Entries)
+				{
+					(string, string) key = (StripLodSuffix(entry.Name), MatrixKey(entry.WorldMatrix));
+					if (!objects.TryGetValue(key, out SortedDictionary<int, List<MeshEntry>>? variants))
+					{
+						variants = [];
+						objects.Add(key, variants);
+					}
+
+					if (!variants.TryGetValue(authoredLod, out List<MeshEntry>? list))
+					{
+						list = [];
+						variants.Add(authoredLod, list);
+					}
+
+					list.Add(entry);
+				}
+			}
+
+			foreach (SortedDictionary<int, List<MeshEntry>> variants in objects.Values)
+			{
+				int selected = -1;
+				foreach (int authoredLod in variants.Keys)
+				{
+					if (authoredLod <= lod)
+					{
+						selected = authoredLod;
+					}
+				}
+
+				if (selected < 0)
+				{
+					selected = variants.Keys.Min();
+				}
+
+				foreach (MeshEntry entry in variants[selected])
+				{
+					yield return entry;
+				}
+			}
+		}
+
+		private static string StripLodSuffix(string name)
+		{
+			int marker = name.LastIndexOf("_LOD", StringComparison.OrdinalIgnoreCase);
+			if (marker < 0 || marker + 4 >= name.Length || !char.IsAsciiDigit(name[marker + 4]))
+			{
+				return name;
+			}
+
+			return name[..marker];
+		}
+
+		// LOD variants live under the same transform, but comparing float bits is
+		// too strict; rounding pairs them while still separating real duplicates.
+		private static string MatrixKey(Matrix4x4 matrix) => FormattableString.Invariant(
+			$"{matrix.M11:F4},{matrix.M12:F4},{matrix.M13:F4},{matrix.M21:F4},{matrix.M22:F4},{matrix.M23:F4},{matrix.M31:F4},{matrix.M32:F4},{matrix.M33:F4},{matrix.M41:F3},{matrix.M42:F3},{matrix.M43:F3}");
 
 		public CellLod GetOrCreateLod(int lod)
 		{
@@ -491,6 +567,8 @@ public static class ViewerPackageExporter
 		public Matrix4x4 WorldMatrix { get; }
 
 		public Type VertexType { get; }
+
+		public long Triangles { get; set; }
 
 		public IMeshBuilder<MaterialBuilder>? Mesh { get; private set; }
 
