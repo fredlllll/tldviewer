@@ -1,9 +1,9 @@
 # TLD Level Viewer
 
-A Unity desktop viewer for the exported The Long Dark levels. It loads a
-prebuilt `levelN.viewer` **cell package** and streams nearby cells while flying
-around. It deliberately never invokes the exporter and never generates or
-probes content on demand.
+A Unity desktop viewer for The Long Dark levels. It lists every level file in the
+game data folder, streams prebuilt `levelN.viewer` **cell packages**, and runs the
+exporter for levels that have not been converted yet. It never generates level
+content itself and never probes for package files beyond the level list.
 
 ## Open
 
@@ -23,9 +23,23 @@ probes content on demand.
 - **F**: reframe the loaded level on its playable terrain
 - **Escape**: release the mouse cursor
 
-At the top-left, pick a `*.viewer` package directory from the configured
-folder, or paste an absolute path and press **Load**. The default folder is the
-shared export location: `\\VBoxSvr\TLDLevels\tldlevels\levels`.
+The level list is built from the game data folder (default
+`\\VBoxSvr\TheLongDark\tld_dlc\wintermute\tld_Data`). Every level button shows
+its source size and whether a package already exists:
+
+- **exported** (green): `levelN.viewer/manifest.json` exists, so the level loads
+  immediately;
+- **convert** (amber): the button runs the exporter for that level first, then
+  streams the new package.
+
+The size is the source `levelN` file size. Conversion cost grows with it
+(roughly half a minute of loader overhead plus several seconds per MB). The
+**Filter** field narrows the list by name.
+
+The viewer auto-detects a Release or Debug build of the exporter in
+`src/TldLevels.Exporter/bin`, falling back to `dotnet run` on the project file.
+The **Exporter** field can point at the `.exe`, `.dll` or `.csproj` if the
+viewer runs outside the repository.
 
 When a package is open, a slider sets the streaming radius (256–4000 m). Cells
 are loaded nearest-first and released once they are well outside that radius.

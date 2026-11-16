@@ -363,6 +363,11 @@ draw-mesh extraction or terrain rebuilding regressed.
 The Unity viewer streams cells nearest-first, keeps them inside a radius,
 instances the shared meshes and selects a LOD per instance at distance.
 
+- **On-demand conversion.** The level list comes from the game data folder, not
+  from existing packages. Each button shows the source file size and whether a
+  package already exists; clicking a missing level runs the exporter for that
+  level and then opens the new package. Package creation stays checkpointed in
+  the exporter, so a failed or interrupted conversion leaves no usable package.
 - **1/30 s import budget per frame.** `PackageLoadBudget.BeginFrame()` resets
   the window explicitly because `Time.frameCount` may not advance in
   `-nographics` batch mode.

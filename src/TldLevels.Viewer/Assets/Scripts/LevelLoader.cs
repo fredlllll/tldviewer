@@ -1,22 +1,39 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using UnityEngine;
+using Debug = UnityEngine.Debug;
 
 namespace TldLevels.Viewer
 {
 
-/// <summary>Streams a <c>.viewer</c> cell package.</summary>
+/// <summary>
+/// Lists every level file in the game data folder, marks which ones already
+/// have a <c>.viewer</c> package, and converts missing packages with the
+/// exporter before streaming them.
+/// </summary>
 public sealed class LevelLoader : MonoBehaviour
 {
     private const string ExportFolderKey = "TldLevels.Viewer.ExportFolder";
+    private const string GameFolderKey = "TldLevels.Viewer.GameFolder";
+    private const string ExporterPathKey = "TldLevels.Viewer.ExporterPath";
     private const string DefaultExportFolder = @"\\VBoxSvr\TLDLevels\tldlevels\levels";
+    private const string DefaultGameFolder = @"\\VBoxSvr\TheLongDark\tld_dlc\wintermute\tld_Data";
+    private const long StubThresholdBytes = 20 * 1024;
+
+    private static readonly Color ExportedColor = new Color(0.62f, 0.90f, 0.62f);
+    private static readonly Color ConvertColor = new Color(1.00f, 0.82f, 0.52f);
 
     private string exportFolder = DefaultExportFolder;
+    private string gameFolder = DefaultGameFolder;
+    private string exporterPath = string.Empty;
     private string pathInput = string.Empty;
-    private string status = "Choose a level package to load.";
-    private string[] levelEntries = Array.Empty<string>();
-    private int selectedIndex;
+    private string filter = string.Empty;
+    private string status = "Scanning game files...";
+    private List<Level> levels = new List<Level>();
     private Vector2 levelListScroll;
     private PackageStreamer packageStreamer;
     private bool isLoading;
@@ -24,40 +41,70 @@ public sealed class LevelLoader : MonoBehaviour
     private void Start()
     {
         exportFolder = PlayerPrefs.GetString(ExportFolderKey, DefaultExportFolder);
+        gameFolder = PlayerPrefs.GetString(GameFolderKey, DefaultGameFolder);
+        exporterPath = PlayerPrefs.GetString(ExporterPathKey, DefaultExporterPath());
         RefreshLevels();
     }
 
     private void OnGUI()
     {
-        GUILayout.BeginArea(new Rect(16, 16, 520, 420), GUI.skin.box);
+        GUILayout.BeginArea(new Rect(16, 16, 760, 660), GUI.skin.box);
         GUILayout.Label("TLD Level Viewer", GUI.skin.label);
+
         GUILayout.Label("Export folder");
         exportFolder = GUILayout.TextField(exportFolder);
+        GUILayout.Label("Game data folder");
+        gameFolder = GUILayout.TextField(gameFolder);
+        GUILayout.Label("Exporter (exe, dll or .csproj)");
+        exporterPath = GUILayout.TextField(exporterPath);
+
         GUILayout.BeginHorizontal();
-        if (GUILayout.Button("Refresh", GUILayout.Width(100))) RefreshLevels();
-        GUI.enabled = levelEntries.Length > 0 && !isLoading;
-        if (GUILayout.Button("Load selected", GUILayout.Width(130))) Load(levelEntries[selectedIndex]);
-        GUI.enabled = true;
+        if (GUILayout.Button("Rescan", GUILayout.Width(100))) RefreshLevels();
+        if (GUILayout.Button("Clear filter", GUILayout.Width(100))) filter = string.Empty;
+        GUILayout.Label("Filter");
+        filter = GUILayout.TextField(filter);
         GUILayout.EndHorizontal();
 
-        if (levelEntries.Length > 0)
+        bool exporterReady = !string.IsNullOrWhiteSpace(exporterPath) && File.Exists(exporterPath);
+        if (!exporterReady)
         {
-            levelListScroll = GUILayout.BeginScrollView(levelListScroll, GUILayout.Height(120));
-            string[] labels = new string[levelEntries.Length];
-            for (int i = 0; i < levelEntries.Length; i++)
-                labels[i] = Path.GetFileName(levelEntries[i]);
-            int newIndex = GUILayout.SelectionGrid(selectedIndex, labels, 3);
-            GUILayout.EndScrollView();
-            newIndex = Mathf.Clamp(newIndex, 0, levelEntries.Length - 1);
-            if (newIndex != selectedIndex)
-            {
-                selectedIndex = newIndex;
-                pathInput = levelEntries[selectedIndex];
-            }
+            GUILayout.Label("Exporter not found. Build src\\TldLevels.Exporter or set its path above.");
+        }
+
+        List<Level> visible = levels
+            .Where(level => filter.Length == 0
+                || level.SceneName.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0)
+            .ToList();
+
+        if (visible.Count == 0)
+        {
+            GUILayout.Label(levels.Count == 0
+                ? "No level files found in the game data folder."
+                : "No levels match the filter.");
         }
         else
         {
-            GUILayout.Label("No .viewer packages found. Paste a path below.");
+            levelListScroll = GUILayout.BeginScrollView(levelListScroll, GUILayout.Height(330));
+            const int columns = 2;
+            GUI.enabled = !isLoading;
+            for (int i = 0; i < visible.Count; i += columns)
+            {
+                GUILayout.BeginHorizontal();
+                for (int column = 0; column < columns && i + column < visible.Count; column++)
+                {
+                    Level level = visible[i + column];
+                    Color previous = GUI.backgroundColor;
+                    GUI.backgroundColor = level.Exported ? ExportedColor : ConvertColor;
+                    if (GUILayout.Button(level.ButtonLabel, GUILayout.Height(26)))
+                        LoadLevel(level);
+                    GUI.backgroundColor = previous;
+                }
+
+                GUILayout.EndHorizontal();
+            }
+
+            GUI.enabled = true;
+            GUILayout.EndScrollView();
         }
 
         GUILayout.Label("Package path (.viewer)");
@@ -103,24 +150,57 @@ public sealed class LevelLoader : MonoBehaviour
     private void RefreshLevels()
     {
         PlayerPrefs.SetString(ExportFolderKey, exportFolder);
-        if (!Directory.Exists(exportFolder))
+        PlayerPrefs.SetString(GameFolderKey, gameFolder);
+        PlayerPrefs.SetString(ExporterPathKey, exporterPath);
+
+        levels = new List<Level>();
+        if (!Directory.Exists(gameFolder))
         {
-            levelEntries = Array.Empty<string>();
-            status = $"Folder not found: {exportFolder}";
+            status = $"Game data folder not found: {gameFolder}";
             return;
         }
 
-        string[] packages = Directory.GetDirectories(exportFolder, "*.viewer")
-            .Where(directory => File.Exists(Path.Combine(directory, "manifest.json")))
-            .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        levelEntries = packages;
-        selectedIndex = 0;
-        pathInput = levelEntries.FirstOrDefault() ?? pathInput;
-        levelListScroll = Vector2.zero;
-        status = levelEntries.Length == 0
-            ? $"Folder contains no .viewer packages: {exportFolder}"
-            : $"Found {packages.Length} package(s).";
+        try
+        {
+            foreach (string file in Directory.GetFiles(gameFolder))
+            {
+                // Same naming rule and stub threshold as the exporter's LevelCatalog.
+                string name = Path.GetFileName(file);
+                if (!name.StartsWith("level", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                string idText = name.Substring("level".Length);
+                if (!int.TryParse(idText, out int id))
+                    continue;
+
+                long size = new FileInfo(file).Length;
+                levels.Add(new Level
+                {
+                    Id = id,
+                    SceneName = name,
+                    SourcePath = file,
+                    SizeBytes = size,
+                    IsStub = size < StubThresholdBytes,
+                });
+            }
+        }
+        catch (Exception exception)
+        {
+            levels = new List<Level>();
+            status = $"Could not scan {gameFolder}: {exception.Message}";
+            return;
+        }
+        levels.Sort((a, b) => a.Id.CompareTo(b.Id));
+        foreach (Level level in levels)
+        {
+            level.Exported = File.Exists(Path.Combine(exportFolder, level.SceneName + ".viewer", "manifest.json"));
+            level.UpdateLabel();
+        }
+
+        int exported = levels.Count(level => level.Exported);
+        status = levels.Count == 0
+            ? $"No level files found in {gameFolder}"
+            : $"Found {levels.Count} levels: {exported} exported, {levels.Count - exported} to convert.";
     }
 
     private void FrameLoadedLevel()
@@ -173,6 +253,113 @@ public sealed class LevelLoader : MonoBehaviour
         status = $"Package not found: {path}";
     }
 
+    private async void LoadLevel(Level level)
+    {
+        if (isLoading || level == null)
+            return;
+
+        isLoading = true;
+        try
+        {
+            if (!level.Exported)
+            {
+                if (!await ConvertLevelAsync(level))
+                    return;
+
+                level.Exported = true;
+                level.UpdateLabel();
+                status = $"Converted {level.SceneName}.";
+            }
+
+            string packagePath = Path.Combine(exportFolder, level.SceneName + ".viewer");
+            pathInput = packagePath;
+            LoadPackage(packagePath);
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task<bool> ConvertLevelAsync(Level level)
+    {
+        if (string.IsNullOrWhiteSpace(exporterPath) || !File.Exists(exporterPath))
+        {
+            status = "Exporter not found. Build src\\TldLevels.Exporter or set its path above.";
+            return false;
+        }
+
+        status = $"Converting {level.SceneName} ({level.Megabytes:F1} MB source)...";
+        try
+        {
+            ProcessStartInfo startInfo = CreateExporterStartInfo(level);
+            using Process process = new Process { StartInfo = startInfo };
+            process.Start();
+
+            Task<string> stdout = process.StandardOutput.ReadToEndAsync();
+            Task<string> stderr = process.StandardError.ReadToEndAsync();
+            await Task.Run(() => process.WaitForExit());
+
+            string output = await stdout;
+            string error = await stderr;
+            string packagePath = Path.Combine(exportFolder, level.SceneName + ".viewer");
+            if (process.ExitCode != 0 || !File.Exists(Path.Combine(packagePath, "manifest.json")))
+            {
+                string detail = LastLine(error) ?? LastLine(output) ?? "see export.log";
+                status = $"Conversion failed (exit {process.ExitCode}): {detail}";
+                Debug.LogError($"[exporter] {error}\n{output}");
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception exception)
+        {
+            status = $"Could not run the exporter: {exception.Message}";
+            Debug.LogException(exception);
+            return false;
+        }
+    }
+
+    private ProcessStartInfo CreateExporterStartInfo(Level level)
+    {
+        ProcessStartInfo startInfo = new ProcessStartInfo
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+
+        if (exporterPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+        {
+            startInfo.FileName = "dotnet";
+            startInfo.ArgumentList.Add("run");
+            startInfo.ArgumentList.Add("--project");
+            startInfo.ArgumentList.Add(exporterPath);
+            startInfo.ArgumentList.Add("-c");
+            startInfo.ArgumentList.Add("Release");
+            startInfo.ArgumentList.Add("--");
+        }
+        else if (exporterPath.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+        {
+            startInfo.FileName = "dotnet";
+            startInfo.ArgumentList.Add(exporterPath);
+        }
+        else
+        {
+            startInfo.FileName = exporterPath;
+        }
+
+        startInfo.ArgumentList.Add("--input");
+        startInfo.ArgumentList.Add(gameFolder);
+        startInfo.ArgumentList.Add("--output");
+        startInfo.ArgumentList.Add(exportFolder);
+        startInfo.ArgumentList.Add("--levels");
+        startInfo.ArgumentList.Add(level.Id.ToString());
+        return startInfo;
+    }
+
     private void LoadPackage(string path)
     {
         if (!PackageManifest.TryLoad(path, out PackageManifest manifest, out string error))
@@ -210,6 +397,75 @@ public sealed class LevelLoader : MonoBehaviour
     private void UnloadCurrent()
     {
         packageStreamer?.Shutdown();
+    }
+
+    private static string DefaultExporterPath()
+    {
+        string root = FindRepositoryRoot();
+        foreach (string configuration in new[] { "Release", "Debug" })
+        {
+            string directory = Path.Combine(root, "src", "TldLevels.Exporter", "bin", configuration, "net10.0");
+            string exe = Path.Combine(directory, "TldLevels.Exporter.exe");
+            if (File.Exists(exe))
+                return exe;
+
+            string dll = Path.Combine(directory, "TldLevels.Exporter.dll");
+            if (File.Exists(dll))
+                return dll;
+        }
+
+        string project = Path.Combine(root, "src", "TldLevels.Exporter", "TldLevels.Exporter.csproj");
+        return File.Exists(project) ? project : string.Empty;
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        DirectoryInfo directory = new DirectoryInfo(Application.dataPath);
+        while (directory != null)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "TldLevels.slnx")))
+                return directory.FullName;
+
+            directory = directory.Parent;
+        }
+
+        return Path.GetFullPath(Path.Combine(Application.dataPath, "..", "..", ".."));
+    }
+
+    private static string LastLine(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        string[] lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+        for (int i = lines.Length - 1; i >= 0; i--)
+        {
+            string line = lines[i].Trim();
+            if (line.Length > 0)
+                return line.Length > 240 ? line.Substring(0, 240) : line;
+        }
+
+        return null;
+    }
+
+    private sealed class Level
+    {
+        public int Id;
+        public string SceneName;
+        public string SourcePath;
+        public long SizeBytes;
+        public bool IsStub;
+        public bool Exported;
+        public string ButtonLabel { get; private set; }
+
+        public double Megabytes => SizeBytes / (1024.0 * 1024.0);
+
+        public void UpdateLabel()
+        {
+            ButtonLabel =
+                $"{SceneName}   {(Exported ? "exported" : "convert")}   {Megabytes:F1} MB" +
+                (IsStub ? "  (stub)" : string.Empty);
+        }
     }
 }
 }

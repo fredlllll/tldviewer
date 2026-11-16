@@ -34,10 +34,11 @@ Generated files are written **outside the repository**, by default to
 
 ## Viewer
 
-`src/TldLevels.Viewer` is a separate Unity 6 project that loads a `levelN.viewer`
-package and provides fly navigation. Open it from Unity Hub, then run
-`Assets/Scenes/Viewer.unity`. It reads files from the existing output folder by
-default and never invokes the exporter. See its
+`src/TldLevels.Viewer` is a separate Unity 6 project that lists the levels in the
+game data folder and streams `levelN.viewer` packages. Open it from Unity Hub,
+then run `Assets/Scenes/Viewer.unity`. It reads files from the existing output
+folder by default, marks levels that are already exported, and runs the exporter
+automatically when you load a level that has not been converted yet. See its
 [README](src/TldLevels.Viewer/README.md) for setup and controls.
 
 ## Build
