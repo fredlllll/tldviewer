@@ -1,15 +1,12 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Threading.Tasks;
-using GLTFast;
 using UnityEngine;
 
 namespace TldLevels.Viewer
 {
 
-/// <summary>Loads a whole local GLB or streams a <c>.viewer</c> cell package.</summary>
+/// <summary>Streams a <c>.viewer</c> cell package.</summary>
 public sealed class LevelLoader : MonoBehaviour
 {
     private const string ExportFolderKey = "TldLevels.Viewer.ExportFolder";
@@ -17,12 +14,10 @@ public sealed class LevelLoader : MonoBehaviour
 
     private string exportFolder = DefaultExportFolder;
     private string pathInput = string.Empty;
-    private string status = "Choose a level to load.";
+    private string status = "Choose a level package to load.";
     private string[] levelEntries = Array.Empty<string>();
     private int selectedIndex;
     private Vector2 levelListScroll;
-    private GameObject loadedLevel;
-    private GltfImport loadedImport;
     private PackageStreamer packageStreamer;
     private bool isLoading;
 
@@ -62,13 +57,13 @@ public sealed class LevelLoader : MonoBehaviour
         }
         else
         {
-            GUILayout.Label("No GLBs or .viewer packages found. Paste a path below.");
+            GUILayout.Label("No .viewer packages found. Paste a path below.");
         }
 
-        GUILayout.Label("Level path (GLB or .viewer)");
+        GUILayout.Label("Package path (.viewer)");
         pathInput = GUILayout.TextField(pathInput);
         GUILayout.BeginHorizontal();
-        GUI.enabled = !isLoading && (File.Exists(pathInput) || Directory.Exists(pathInput));
+        GUI.enabled = !isLoading && Directory.Exists(pathInput);
         if (GUILayout.Button("Load path")) Load(pathInput);
         GUI.enabled = IsSomethingLoaded() && !isLoading;
         if (GUILayout.Button("Frame level (F)", GUILayout.Width(140))) FrameLoadedLevel();
@@ -103,7 +98,7 @@ public sealed class LevelLoader : MonoBehaviour
     }
 
     private bool IsSomethingLoaded() =>
-        loadedLevel != null || (packageStreamer != null && packageStreamer.IsRunning);
+        packageStreamer != null && packageStreamer.IsRunning;
 
     private void RefreshLevels()
     {
@@ -115,20 +110,17 @@ public sealed class LevelLoader : MonoBehaviour
             return;
         }
 
-        string[] glbs = Directory.GetFiles(exportFolder, "*.glb");
         string[] packages = Directory.GetDirectories(exportFolder, "*.viewer")
             .Where(directory => File.Exists(Path.Combine(directory, "manifest.json")))
-            .ToArray();
-        levelEntries = glbs
-            .Concat(packages)
             .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        levelEntries = packages;
         selectedIndex = 0;
         pathInput = levelEntries.FirstOrDefault() ?? pathInput;
         levelListScroll = Vector2.zero;
         status = levelEntries.Length == 0
-            ? $"Folder contains no GLBs or .viewer packages: {exportFolder}"
-            : $"Found {glbs.Length} GLB(s) and {packages.Length} package(s).";
+            ? $"Folder contains no .viewer packages: {exportFolder}"
+            : $"Found {packages.Length} package(s).";
     }
 
     private void FrameLoadedLevel()
@@ -164,80 +156,8 @@ public sealed class LevelLoader : MonoBehaviour
             return true;
         }
 
-        if (loadedLevel == null)
-            return false;
-
-        Renderer[] renderers = loadedLevel.GetComponentsInChildren<Renderer>();
-        var entries = new List<(Bounds Bounds, float Size, string Name)>();
-        foreach (Renderer renderer in renderers)
-        {
-            if (!renderer.enabled)
-                continue;
-
-            Bounds bounds = renderer.bounds;
-            if (!IsFinite(bounds.center) || !IsFinite(bounds.size))
-                continue;
-
-            float size = Mathf.Max(bounds.size.x, bounds.size.y, bounds.size.z);
-            if (size > 0f)
-                entries.Add((bounds, size, renderer.name));
-        }
-
-        if (entries.Count == 0)
-            return false;
-
-        // Prefer terrain bounds when present: distant sky or water shells can
-        // otherwise dwarf the playable area and make automatic framing useless.
-        var terrainEntries = entries
-            .Where(entry => entry.Name.Contains("terrain", StringComparison.OrdinalIgnoreCase))
-            .ToArray();
-        IEnumerable<(Bounds Bounds, float Size, string Name)> selected = terrainEntries.Length > 0
-            ? terrainEntries
-            : entries.Where(entry => entry.Size <= GetSizeCutoff(entries));
-
-        bool hasBounds = false;
-        foreach ((Bounds bounds, _, _) in selected)
-        {
-            if (!hasBounds)
-            {
-                result = bounds;
-                hasBounds = true;
-            }
-            else
-            {
-                result.Encapsulate(bounds);
-            }
-        }
-
-        return hasBounds;
+        return false;
     }
-
-    private static string SummarizeMaterials(GameObject root)
-    {
-        HashSet<Material> materials = new();
-        foreach (Renderer renderer in root.GetComponentsInChildren<Renderer>())
-        {
-            foreach (Material material in renderer.sharedMaterials)
-            {
-                if (material != null)
-                    materials.Add(material);
-            }
-        }
-
-        int textured = materials.Count(material =>
-            material.HasProperty("baseColorTexture") && material.GetTexture("baseColorTexture") != null);
-        return $"{materials.Count} material(s), {textured} with a base texture.";
-    }
-
-    private static float GetSizeCutoff(List<(Bounds Bounds, float Size, string Name)> entries)
-    {
-        float[] sizes = entries.Select(entry => entry.Size).OrderBy(size => size).ToArray();
-        int index = Mathf.Clamp(Mathf.FloorToInt(sizes.Length * 0.95f), 0, sizes.Length - 1);
-        return Mathf.Max(sizes[index] * 2f, 20f);
-    }
-
-    private static bool IsFinite(Vector3 value) =>
-        float.IsFinite(value.x) && float.IsFinite(value.y) && float.IsFinite(value.z);
 
     private void Load(string path)
     {
@@ -247,11 +167,10 @@ public sealed class LevelLoader : MonoBehaviour
         if (Directory.Exists(path))
         {
             LoadPackage(path);
+            return;
         }
-        else if (File.Exists(path))
-        {
-            _ = LoadGlbAsync(path);
-        }
+
+        status = $"Package not found: {path}";
     }
 
     private void LoadPackage(string path)
@@ -290,52 +209,7 @@ public sealed class LevelLoader : MonoBehaviour
 
     private void UnloadCurrent()
     {
-        if (loadedLevel != null)
-        {
-            Destroy(loadedLevel);
-            loadedLevel = null;
-        }
-
-        loadedImport?.Dispose();
-        loadedImport = null;
         packageStreamer?.Shutdown();
-    }
-
-    private async System.Threading.Tasks.Task LoadGlbAsync(string path)
-    {
-        if (isLoading || !File.Exists(path)) return;
-        isLoading = true;
-        status = $"Loading {Path.GetFileName(path)}...";
-
-        try
-        {
-            var import = new GltfImport();
-            if (!await import.LoadFile(path))
-                throw new InvalidOperationException("glTFast could not parse this GLB.");
-
-            var root = new GameObject(Path.GetFileNameWithoutExtension(path));
-            if (!await import.InstantiateMainSceneAsync(root.transform))
-            {
-                Destroy(root);
-                import.Dispose();
-                throw new InvalidOperationException("glTFast could not instantiate this GLB.");
-            }
-
-            UnloadCurrent();
-            loadedLevel = root;
-            loadedImport = import;
-            FrameLoadedLevel();
-            status = $"Loaded {Path.GetFileName(path)}. {SummarizeMaterials(root)}";
-        }
-        catch (Exception exception)
-        {
-            status = $"Load failed: {exception.Message}";
-            Debug.LogException(exception);
-        }
-        finally
-        {
-            isLoading = false;
-        }
     }
 }
 }

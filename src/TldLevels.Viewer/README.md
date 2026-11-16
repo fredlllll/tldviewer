@@ -1,10 +1,9 @@
 # TLD Level Viewer
 
-A Unity desktop viewer for the exported The Long Dark levels. It loads either a
-single whole-level **GLB** (debug/diagnostic mode) or a prebuilt
-`levelN.viewer` **cell package** that streams nearby cells while flying around.
-It deliberately never invokes the exporter and never generates or probes
-content on demand.
+A Unity desktop viewer for the exported The Long Dark levels. It loads a
+prebuilt `levelN.viewer` **cell package** and streams nearby cells while flying
+around. It deliberately never invokes the exporter and never generates or
+probes content on demand.
 
 ## Open
 
@@ -24,7 +23,7 @@ content on demand.
 - **F**: reframe the loaded level on its playable terrain
 - **Escape**: release the mouse cursor
 
-At the top-left, pick a `*.glb` file or `*.viewer` directory from the configured
+At the top-left, pick a `*.viewer` package directory from the configured
 folder, or paste an absolute path and press **Load**. The default folder is the
 shared export location: `\\VBoxSvr\TLDLevels\tldlevels\levels`.
 
