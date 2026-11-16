@@ -243,7 +243,9 @@ public static class PackageSmokeTest
         string[] sample = referenced.Take(24).ToArray();
         foreach (string id in sample)
         {
-            Task<PackageAsset> task = assets.Request(id);
+            // Batch mode has no streaming update loop, so exercise the same
+            // prepare/import path synchronously instead of the queue.
+            Task<PackageAsset> task = assets.LoadNowAsync(id);
             if (task != null)
             {
                 await task;
@@ -291,6 +293,12 @@ public static class PackageSmokeTest
         {
             throw new InvalidOperationException($"Sampled instance assets still use {placeholders} placeholder texture(s).");
         }
+
+        // The sample above used the synchronous test path. Load a second batch
+        // through Request/Update so the background readers, prepared queue and
+        // shared frame budget are exercised against the real package.
+        string[] queuedSample = referenced.Skip(sample.Length).Take(24).ToArray();
+        await CheckQueuedLoadsAsync(assets, queuedSample);
 
         // Build a small subset with the real transforms and verify the bounds
         // land inside the level. This mirrors what PackageStreamer does.
@@ -345,6 +353,43 @@ public static class PackageSmokeTest
             $"{sample.Length} sampled, {textured} textured material(s)");
 
         return file.instances.Length;
+    }
+
+    private static async Task CheckQueuedLoadsAsync(PackageAssets assets, string[] ids)
+    {
+        if (ids.Length == 0)
+        {
+            return;
+        }
+
+        PackageLoadBudget budget = new PackageLoadBudget();
+        foreach (string id in ids)
+        {
+            assets.Request(id);
+        }
+
+        DateTime deadline = DateTime.UtcNow.AddSeconds(60);
+        int ready = 0;
+        while (DateTime.UtcNow < deadline)
+        {
+            budget.BeginFrame();
+            assets.Update(budget);
+            ready = ids.Count(id => assets.Get(id) != null);
+            if (ready == ids.Length)
+            {
+                break;
+            }
+
+            await Task.Yield();
+        }
+
+        if (ready != ids.Length)
+        {
+            throw new InvalidOperationException(
+                $"Queued load completed {ready}/{ids.Length} assets through the background path.");
+        }
+
+        Debug.Log($"[smoke] queued load: {ready} asset(s) through background prefetch and budgeted import");
     }
 
     private static async Task<LodResult> LoadLodAsync(

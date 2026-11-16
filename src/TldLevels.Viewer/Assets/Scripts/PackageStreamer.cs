@@ -32,9 +32,8 @@ namespace TldLevels.Viewer
         [Tooltip("Distance between LOD switches, in cell widths.")]
         public float LodDistanceCells = 1.5f;
 
-        [Range(0.05f, 1f)]
-        [Tooltip("Fraction of the frame time glTFast may spend importing a cell.")]
-        public float ImportFrameBudget = 0.25f;
+        [Tooltip("Maximum seconds per frame spent importing cells and shared assets.")]
+        public float LoadFrameBudget = 1f / 30f;
 
         private PackageManifest manifest;
         private string packageDirectory;
@@ -42,8 +41,7 @@ namespace TldLevels.Viewer
         private Transform container;
         private PackageTextures textures;
         private PackageAssets assets;
-        private ViewerDownloadProvider downloadProvider;
-        private TimeBudgetPerFrameDeferAgent deferAgent;
+        private PackageLoadBudget budget;
         private readonly List<Cell> cells = new List<Cell>();
         private readonly List<Cell> wanted = new List<Cell>();
         private int generation;
@@ -79,14 +77,7 @@ namespace TldLevels.Viewer
             sharedDirectory = packageManifest.GetSharedDirectory(directory);
             textures = new PackageTextures(Path.Combine(sharedDirectory, "textures"));
             assets = new PackageAssets(sharedDirectory, packageManifest, textures);
-            downloadProvider = new ViewerDownloadProvider();
-            deferAgent = GetComponent<TimeBudgetPerFrameDeferAgent>();
-            if (deferAgent == null)
-            {
-                deferAgent = gameObject.AddComponent<TimeBudgetPerFrameDeferAgent>();
-            }
-
-            deferAgent.SetFrameBudget(ImportFrameBudget);
+            budget = new PackageLoadBudget(LoadFrameBudget);
 
             GameObject cellsRoot = new GameObject(packageManifest.level + " cells");
             cellsRoot.transform.SetParent(transform, false);
@@ -137,6 +128,7 @@ namespace TldLevels.Viewer
             assets = null;
             textures?.Dispose();
             textures = null;
+            budget = null;
             manifest = null;
             packageDirectory = null;
             sharedDirectory = null;
@@ -154,6 +146,8 @@ namespace TldLevels.Viewer
                 return;
             }
 
+            budget?.BeginFrame();
+
             if (Time.unscaledTime >= nextEvaluateTime)
             {
                 Evaluate();
@@ -164,6 +158,9 @@ namespace TldLevels.Viewer
             {
                 TryStartLoad();
             }
+
+            // Cell and asset imports draw from the same frame allowance.
+            assets?.Update(budget);
         }
 
         private void Evaluate()
@@ -263,13 +260,38 @@ namespace TldLevels.Viewer
                 root.transform.SetParent(container, false);
 
                 PackageLodManifest lod = cell.Data.SelectLod(DesiredLod(cell.PendingDistance));
-                if (lod != null)
+                PreparedCell prepared = await Task.Run(() => PrepareCell(cell, lod));
+
+                if (loadGeneration != generation)
                 {
-                    string path = Path.Combine(packageDirectory, lod.file.Replace('/', Path.DirectorySeparatorChar));
-                    import = new GltfImport(downloadProvider, deferAgent);
-                    if (!await import.LoadFile(path, new Uri(path)))
+                    Destroy(root);
+                    return;
+                }
+
+                if (prepared.Json != null)
+                {
+                    // Read the PNGs beside the main-thread import. The budgeted
+                    // apply below falls back to disk for any that lose the race.
+                    _ = Task.Run(() => textures.PrefetchFromJson(prepared.Json));
+                }
+
+                if (prepared.InstancesError != null)
+                {
+                    Debug.LogWarning($"[PackageStreamer] {cell.Data.id}: {prepared.InstancesError}");
+                }
+
+                if (prepared.Json != null || prepared.Bytes != null)
+                {
+                    ViewerDownloadProvider provider = new ViewerDownloadProvider(
+                        prepared.BinName,
+                        prepared.BinBytes);
+                    import = new GltfImport(provider, budget);
+                    bool loaded = prepared.Json != null
+                        ? await import.LoadGltfJson(prepared.Json, new Uri(prepared.Path))
+                        : await import.Load(prepared.Bytes, new Uri(prepared.Path));
+                    if (!loaded)
                     {
-                        throw new InvalidOperationException($"glTFast could not parse {lod.file}.");
+                        throw new InvalidOperationException($"glTFast could not parse {prepared.Path}.");
                     }
 
                     if (loadGeneration != generation)
@@ -281,10 +303,10 @@ namespace TldLevels.Viewer
 
                     if (!await import.InstantiateMainSceneAsync(root.transform))
                     {
-                        throw new InvalidOperationException($"glTFast could not instantiate {lod.file}.");
+                        throw new InvalidOperationException($"glTFast could not instantiate {prepared.Path}.");
                     }
 
-                    textures.Apply(import);
+                    await textures.ApplyAsync(import, budget);
                 }
 
                 if (loadGeneration != generation)
@@ -295,7 +317,19 @@ namespace TldLevels.Viewer
                 }
 
                 cell.Instances.Clear();
-                long instanceTriangles = LoadInstances(cell, root);
+                long instanceTriangles = await LoadInstancesAsync(
+                    cell,
+                    root,
+                    prepared.InstancesJson,
+                    loadGeneration);
+
+                if (loadGeneration != generation)
+                {
+                    import?.Dispose();
+                    Destroy(root);
+                    return;
+                }
+
                 cell.Root = root;
                 cell.Import = import;
                 cell.LoadedLod = lod?.level ?? -1;
@@ -333,29 +367,74 @@ namespace TldLevels.Viewer
         }
 
         /// <summary>
-        /// Creates the empty instance roots for a cell. Assets are filled in as
-        /// soon as they have loaded, so terrain is visible immediately.
+        /// Runs on a worker thread: reads the cell glTF (or GLB), its buffer
+        /// and <c>instances.json</c> so the main thread only has to import.
         /// </summary>
-        private long LoadInstances(Cell cell, GameObject cellRoot)
+        private PreparedCell PrepareCell(Cell cell, PackageLodManifest lod)
         {
-            if (string.IsNullOrEmpty(cell.Data.instances))
+            PreparedCell prepared = new PreparedCell();
+            if (lod != null && !string.IsNullOrEmpty(lod.file))
             {
-                return 0;
+                string path = Path.Combine(
+                    packageDirectory,
+                    lod.file.Replace('/', Path.DirectorySeparatorChar));
+                prepared.Path = path;
+
+                if (path.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase))
+                {
+                    prepared.Json = File.ReadAllText(path);
+                }
+                else
+                {
+                    prepared.Bytes = File.ReadAllBytes(path);
+                }
+
+                string binPath = Path.ChangeExtension(path, ".bin");
+                if (File.Exists(binPath))
+                {
+                    prepared.BinName = Path.GetFileName(binPath);
+                    prepared.BinBytes = File.ReadAllBytes(binPath);
+                }
             }
 
-            string path = Path.Combine(
-                packageDirectory,
-                cell.Data.instances.Replace('/', Path.DirectorySeparatorChar));
-            if (!File.Exists(path))
+            if (!string.IsNullOrEmpty(cell.Data.instances))
             {
-                Debug.LogWarning($"[PackageStreamer] {cell.Data.id}: missing {cell.Data.instances}");
+                string path = Path.Combine(
+                    packageDirectory,
+                    cell.Data.instances.Replace('/', Path.DirectorySeparatorChar));
+                if (File.Exists(path))
+                {
+                    prepared.InstancesJson = File.ReadAllText(path);
+                }
+                else
+                {
+                    prepared.InstancesError = $"missing {cell.Data.instances}";
+                }
+            }
+
+            return prepared;
+        }
+
+        /// <summary>
+        /// Creates the empty instance roots for a cell. Assets are filled in as
+        /// soon as they have loaded, so terrain is visible immediately. Long
+        /// instance lists yield to the next frame when the budget is spent.
+        /// </summary>
+        private async Task<long> LoadInstancesAsync(
+            Cell cell,
+            GameObject cellRoot,
+            string json,
+            int loadGeneration)
+        {
+            if (string.IsNullOrEmpty(json))
+            {
                 return 0;
             }
 
             PackageInstancesFile file;
             try
             {
-                file = JsonUtility.FromJson<PackageInstancesFile>(File.ReadAllText(path));
+                file = JsonUtility.FromJson<PackageInstancesFile>(json);
             }
             catch (Exception exception)
             {
@@ -374,6 +453,15 @@ namespace TldLevels.Viewer
                 if (data == null)
                 {
                     continue;
+                }
+
+                if (budget != null && budget.ShouldDefer())
+                {
+                    await Task.Yield();
+                    if (loadGeneration != generation)
+                    {
+                        return 0;
+                    }
                 }
 
                 GameObject root = new GameObject(string.IsNullOrEmpty(data.name) ? "instance" : data.name);
@@ -505,6 +593,17 @@ namespace TldLevels.Viewer
             cell.LoadedDistance = 0f;
             cell.LoadedTriangles = 0;
             cell.State = CellState.Idle;
+        }
+
+        private sealed class PreparedCell
+        {
+            public string Path;
+            public string Json;
+            public byte[] Bytes;
+            public string BinName;
+            public byte[] BinBytes;
+            public string InstancesJson;
+            public string InstancesError;
         }
 
         private enum CellState

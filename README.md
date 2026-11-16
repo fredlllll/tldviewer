@@ -198,7 +198,9 @@ export stores those once. Caching each material fingerprint and skipping already
 assets cut `level111`'s first export from 1,332 s to 240 s.
 
 The Unity viewer streams cells nearest-first, keeps them inside a radius,
-instances the shared meshes and selects a LOD per instance at distance. See the
+instances the shared meshes and selects a LOD per instance at distance. Package
+files are read on background threads and imported within a 1/30 s per-frame
+budget, so cell and asset loading does not stall navigation. See the
 [viewer README](src/TldLevels.Viewer/README.md).
 
 ## Notes

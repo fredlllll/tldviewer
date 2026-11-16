@@ -30,9 +30,11 @@ shared export location: `\\VBoxSvr\TLDLevels\tldlevels\levels`.
 
 When a package is open, a slider sets the streaming radius (256–4000 m). Cells
 are loaded nearest-first and released once they are well outside that radius.
-Trees, houses and props are instantiated from the shared asset library, with a
-LOD chosen per instance. The status line reports loaded cells, queued cells,
-triangles, loaded/known shared assets and the number of cached textures.
+Cell files and shared assets are read on background threads, and all import
+work is spread across frames by a shared budget. Trees, houses and props are
+instantiated from the shared asset library, with a LOD chosen per instance. The
+status line reports loaded cells, queued cells, triangles, loaded/known shared
+assets and the number of cached textures.
 
 ## Package format
 
@@ -76,12 +78,27 @@ several levels reference the same meshes and textures:
 ## Shared asset cache
 
 glTF cannot reference a mesh defined in another file, so `PackageAssets` loads
-each `<id>.gltf` lazily (at most four at a time), calls `GetMesh(0,0)` and
-`GetMaterial(0)`, and keeps the import alive for the lifetime of the level.
-Every instance in every cell then uses the same Unity mesh and material.
+each `<id>.gltf` lazily and keeps the import alive for the lifetime of the
+level. Two background workers read a shared `<id>.gltf` plus its `<id>.bin`
+from the level share and prefetch the referenced PNG bytes through
+`PackageTextures.PrefetchFromJson` (staging is bounded at 128 MB). The main
+thread then starts at most four prepared asset imports at a time, calls
+`GetMesh(0,0)` and `GetMaterial(0)`, and every instance in every cell uses the
+same Unity mesh and material.
+
+Cell streaming takes the same route: `PackageStreamer.PrepareCell` reads the
+cell `.gltf`, `.bin` and `instances.json` on a background thread, and the main
+thread imports the prepared cell (creating its instance GameObjects with
+budgeted yields).
+
+Cell imports, asset imports and texture application share one
+`PackageLoadBudget` of 1/30 s per frame, configured by the `LoadFrameBudget`
+inspector field in seconds (it replaced the old `ImportFrameBudget` fraction).
+glTFast import break points use that budget, and `PackageTextures.ApplyAsync`
+yields between texture slots once it is spent.
 
 `PackageTextures` works the same way for images: `ViewerDownloadProvider`
-returns a 1×1 placeholder during import, then the cache replaces each material
+returns a 1x1 placeholder during import, then the cache replaces each material
 slot with a texture from `shared/textures`, deduplicated by file name, color
 space and sampler. Cached meshes, materials and textures are marked
 `HideFlags.DontUnloadUnusedAsset`: they are referenced only from managed code,
@@ -96,7 +113,9 @@ the shared assets referenced by its instances, applies the shared textures and
 fails if any placeholder texture survives, if a referenced asset is missing
 from the manifest or fails to load, if the LODs disagree on renderer count, or
 if cell/instance bounds are outside the level or implausibly large for the
-configured cell size (which catches broken node transforms):
+configured cell size (which catches broken node transforms). A second asset
+sample is loaded through the normal `Request`/`Update` queue, so the background
+prefetch and shared frame budget are exercised too:
 
 ```powershell
 Unity.exe -batchmode -nographics `

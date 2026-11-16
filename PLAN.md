@@ -333,13 +333,20 @@ already-written assets cut `level111`'s first export from 1,332 s to 240 s.
 The viewer loads a shared asset glTF once, takes `GetMesh(0,0)` and
 `GetMaterial(0)`, and keeps the import alive for the lifetime of the level.
 glTF cannot reference a mesh defined in another file, so this cache, not the
-package format, is what makes reuse real at runtime.
+package format, is what makes reuse real at runtime. Two background workers read
+the tiny `<id>.gltf`/`<id>.bin` pairs (and stage referenced PNG bytes) so the
+main thread never waits on the network share; prepared imports are then started
+at most four at a time. Cells, assets and texture application all draw from one
+`PackageLoadBudget` of 1/30 s per frame, so importing a new cell cannot stall the
+rest of the frame. Cell glTF/bin and `instances.json` are read the same way.
 
 The shared texture cache in the viewer owns its textures and marks them
 `HideFlags.DontUnloadUnusedAsset`, as do cached meshes and materials. They are
 referenced only from managed code, so Unity's editor asset GC would otherwise
 destroy them while the next cell or asset imports and leave materials with
-glTFast's 1×1 placeholders.
+glTFast's 1×1 placeholders. PNGs are prefetched off-thread into a bounded 128 MB
+staging cache; only decoding and GPU upload stay on the main thread, paused
+between texture slots when the frame budget is spent.
 
 Draw mesh transforms are world matrices from AssetRipper's scene traversal.
 SharpGLTF's SRT constructor is `AffineTransform(scale, rotation, translation)`;
