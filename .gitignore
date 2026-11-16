@@ -4,15 +4,11 @@ obj/
 Source/0Bins/
 *.user
 
-# Generated artefacts (GLBs, previews, manifests) live outside the repo
+# Generated artefacts (viewer packages, manifests) live outside the repo
 output/
-preview/
 
 # Logs
 *.log
-
-# Python bytecode from Blender's --python runs
-__pycache__/
 
 # IDE / OS noise
 .vs/

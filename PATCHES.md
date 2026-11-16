@@ -17,8 +17,9 @@ at build time:
 - expose scene draw meshes for viewer packages (`9d6e68f`);
 - honour the caller's `includeAllLods` flag when collecting draw meshes
   (`1ef5f5d`): `ShouldSkipForVisualization` read the static `IncludeAllLods`
-  property, which only `SceneGlbExporter` sets, so package exports dropped every
-  `_LOD1+` object before the LOD logic saw it.
+  property, which the exporter no longer sets, so package exports dropped every
+  `_LOD1+` object before the LOD logic saw it. The draw-mesh entry point now
+  takes `includeAllLods` as a parameter.
 
 The main repository pins the submodule commit; `git submodule update --init
 --recursive` followed by the checkout recorded by `git ls-tree HEAD

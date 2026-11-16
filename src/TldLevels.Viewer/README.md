@@ -38,9 +38,9 @@ assets and the number of cached textures.
 
 ## Package format
 
-A package is generated once per level by the exporter (`--viewer-package`).
-Level-independent geometry lives in a shared library at the output root, so
-several levels reference the same meshes and textures:
+A package is generated once per level by the exporter. Level-independent
+geometry lives in a shared library at the output root, so several levels
+reference the same meshes and textures:
 
 ```
 <output>/

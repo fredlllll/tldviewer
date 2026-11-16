@@ -28,13 +28,11 @@ public static class ManifestWriter
 			startedUtc = startedUtc.UtcDateTime.ToString("O", CultureInfo.InvariantCulture),
 			completedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
 			assetRipper = "2.0.0",
-			mergeVersion = ManifestState.CurrentMergeVersion,
 			input = inputDirectory,
 			levels = results.Count,
 			exportedBytes = results.Sum(result => result.Bytes),
 			seconds = Math.Round(elapsed.TotalSeconds, 1),
 			succeeded = results.Count(result => result.Status is "ok" or "existing"),
-			merged = results.Count(result => result.Status == "merged"),
 			empty = results.Count(result => result.Status == "empty"),
 			failed = results.Count(result => result.Status == "failed"),
 			pending = results.Count(result => result.Status == "pending"),
@@ -48,22 +46,15 @@ public static class ManifestWriter
 			source = result.Level.SourcePath,
 			sourceBytes = result.Level.SizeBytes,
 			stub = result.Level.IsStub,
-			glb = Relative(outputDirectory, result.GlbPath),
 			package = Relative(outputDirectory, result.PackagePath),
 			bytes = result.Bytes,
-			nodes = result.Stats?.Nodes,
-			meshes = result.Stats?.Meshes,
-			triangles = result.Stats?.Triangles,
-			materials = result.Stats?.Materials,
-			textures = result.Stats?.Textures,
-			meshBoundsMin = result.Stats?.MeshBoundsMin,
-			meshBoundsMax = result.Stats?.MeshBoundsMax,
+			cells = result.Cells,
+			instances = result.Instances,
+			assets = result.Assets,
+			triangles = result.Triangles,
+			lods = result.Lods,
 			exportSeconds = Math.Round(result.ExportSeconds, 1),
-			preview = Relative(outputDirectory, result.PreviewPath),
-			previewSeconds = Math.Round(result.PreviewSeconds, 1),
-			alphaMaterials = result.AlphaMaterials,
 			status = result.Status,
-			mergedInto = result.MergedInto,
 			includes = result.Includes,
 			error = result.Error,
 			warnings = result.Warnings,
@@ -91,7 +82,7 @@ public static class ManifestWriter
 	private static string BuildCsv(string outputDirectory, IReadOnlyList<LevelResult> results)
 	{
 		StringBuilder builder = new();
-		builder.AppendLine("id,scene,status,bytes,nodes,meshes,triangles,materials,textures,exportSeconds,previewSeconds,glb,preview,mergedInto,includes,warnings");
+		builder.AppendLine("id,scene,status,bytes,cells,instances,assets,triangles,lods,exportSeconds,package,includes,warnings");
 
 		foreach (LevelResult result in results)
 		{
@@ -99,28 +90,19 @@ public static class ManifestWriter
 			builder.Append(Escape(result.Level.SceneName)).Append(',');
 			builder.Append(Escape(result.Status)).Append(',');
 			builder.Append(result.Bytes.ToString(CultureInfo.InvariantCulture)).Append(',');
-			builder.Append(Number(result.Stats?.Nodes)).Append(',');
-			builder.Append(Number(result.Stats?.Meshes)).Append(',');
-			builder.Append(Number(result.Stats?.Triangles)).Append(',');
-			builder.Append(Number(result.Stats?.Materials)).Append(',');
-			builder.Append(Number(result.Stats?.Textures)).Append(',');
+			builder.Append(result.Cells.ToString(CultureInfo.InvariantCulture)).Append(',');
+			builder.Append(result.Instances.ToString(CultureInfo.InvariantCulture)).Append(',');
+			builder.Append(result.Assets.ToString(CultureInfo.InvariantCulture)).Append(',');
+			builder.Append(result.Triangles.ToString(CultureInfo.InvariantCulture)).Append(',');
+			builder.Append(result.Lods.ToString(CultureInfo.InvariantCulture)).Append(',');
 			builder.Append(result.ExportSeconds.ToString("0.0", CultureInfo.InvariantCulture)).Append(',');
-			builder.Append(result.PreviewSeconds.ToString("0.0", CultureInfo.InvariantCulture)).Append(',');
-			builder.Append(Escape(Relative(outputDirectory, result.GlbPath) ?? string.Empty)).Append(',');
-			builder.Append(Escape(Relative(outputDirectory, result.PreviewPath) ?? string.Empty)).Append(',');
-			builder.Append(Escape(result.MergedInto ?? string.Empty)).Append(',');
+			builder.Append(Escape(Relative(outputDirectory, result.PackagePath) ?? string.Empty)).Append(',');
 			builder.Append(Escape(string.Join("; ", result.Includes))).Append(',');
 			builder.Append(Escape(string.Join("; ", result.Warnings))).AppendLine();
 		}
 
 		return builder.ToString();
 	}
-
-	private static string Number(long? value) =>
-		value?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
-
-	private static string Number(int? value) =>
-		value?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
 
 	private static string Escape(string value) =>
 		value.Contains(',') || value.Contains('"') || value.Contains('\n')

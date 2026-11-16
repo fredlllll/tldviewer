@@ -16,7 +16,6 @@
 	<ItemGroup>
 		<!-- AssetRipper is vendored as a git submodule pinned to tag 2.0.0. -->
 		<ProjectReference Include="..\..\vendor\AssetRipper\Source\AssetRipper.Export.UnityProjects\AssetRipper.Export.UnityProjects.csproj" />
-		<ProjectReference Include="..\..\vendor\AssetRipper\Source\AssetRipper.Export.PrimaryContent\AssetRipper.Export.PrimaryContent.csproj" />
 	</ItemGroup>
 
 </Project>

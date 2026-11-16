@@ -5,7 +5,6 @@ using TldLevels.Exporter.Cli;
 using TldLevels.Exporter.Export;
 using TldLevels.Exporter.Levels;
 using TldLevels.Exporter.Manifest;
-using TldLevels.Exporter.Preview;
 
 namespace TldLevels.Exporter;
 
@@ -62,21 +61,6 @@ internal static class Program
 		Logger.Add(new ConsoleLogger(true));
 		Logger.Add(new FileLogger(Path.Combine(options.OutputDirectory, "export.log")));
 
-		BlenderRenderer? renderer = null;
-		if (options.Preview)
-		{
-			renderer = BlenderRenderer.TryCreate(options, out string? previewError);
-			if (renderer is null)
-			{
-				Console.WriteLine($"[preview] disabled: {previewError}");
-			}
-			else
-			{
-				Console.WriteLine($"[preview] blender={renderer.BlenderPath}");
-				Console.WriteLine($"[preview] script={renderer.ScriptPath}");
-			}
-		}
-
 		Console.WriteLine($"[run] {levels.Count} level(s) from {options.InputDirectory}");
 		Console.WriteLine($"[run] output {options.OutputDirectory}");
 		Console.WriteLine($"[run] batch size {options.BatchSize}, press Ctrl+C to stop after the current level");
@@ -99,7 +83,7 @@ internal static class Program
 
 		DateTimeOffset startedUtc = DateTimeOffset.UtcNow;
 		Stopwatch watch = Stopwatch.StartNew();
-		ExportRunner runner = new(options, renderer, allLevels);
+		ExportRunner runner = new(options, allLevels);
 
 		// The manifest is rewritten after every completed level, so an
 		// interruption never loses the record of what has already been done.
@@ -154,7 +138,6 @@ internal static class Program
 	{
 		int ok = results.Count(result => result.Status == "ok");
 		int existing = results.Count(result => result.Status == "existing");
-		int merged = results.Count(result => result.Status == "merged");
 		int empty = results.Count(result => result.Status == "empty");
 		int failed = results.Count(result => result.Status == "failed");
 		int pending = results.Count(result => result.Status == "pending");
@@ -162,17 +145,12 @@ internal static class Program
 
 		Console.WriteLine();
 		Console.WriteLine(
-			$"[done] ok={ok} existing={existing} merged={merged} empty={empty} failed={failed} pending={pending} " +
+			$"[done] ok={ok} existing={existing} empty={empty} failed={failed} pending={pending} " +
 			$"bytes={Megabytes(bytes):F1} MB time={elapsed.TotalSeconds:F1}s");
 
 		foreach (LevelResult result in results.Where(result => result.Status == "failed"))
 		{
 			Console.WriteLine($"  FAILED {result.Level.SceneName}: {result.Error}");
-		}
-
-		foreach (LevelResult result in results.Where(result => result.Status == "merged"))
-		{
-			Console.WriteLine($"  MERGED {result.Level.SceneName} -> {result.MergedInto}");
 		}
 
 		int warned = results.Count(result => result.Warnings.Count > 0);

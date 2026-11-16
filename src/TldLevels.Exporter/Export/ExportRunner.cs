@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using AssetRipper.Assets;
 using AssetRipper.Export.Configuration;
-using AssetRipper.Export.PrimaryContent.Models;
 using AssetRipper.Export.UnityProjects;
 using AssetRipper.IO.Files;
 using AssetRipper.Processing;
@@ -9,7 +8,6 @@ using AssetRipper.Processing.Prefabs;
 using TldLevels.Exporter.Cli;
 using TldLevels.Exporter.Levels;
 using TldLevels.Exporter.Manifest;
-using TldLevels.Exporter.Preview;
 
 namespace TldLevels.Exporter.Export;
 
@@ -17,29 +15,26 @@ public sealed class LevelResult
 {
 	public required LevelEntry Level { get; init; }
 
-	public string? GlbPath { get; set; }
-
 	public string? PackagePath { get; set; }
 
 	public long Bytes { get; set; }
 
 	public double ExportSeconds { get; set; }
 
-	public double PreviewSeconds { get; set; }
+	public int Cells { get; set; }
 
-	public string? PreviewPath { get; set; }
+	public int Instances { get; set; }
 
-	public int AlphaMaterials { get; set; }
+	public int Assets { get; set; }
 
-	public GlbStats? Stats { get; set; }
+	public int Lods { get; set; }
 
-	/// <summary>Name of the art scene this design overlay was merged into.</summary>
-	public string? MergedInto { get; set; }
+	public long Triangles { get; set; }
 
-	/// <summary>Design overlays that were merged into this art scene's GLB.</summary>
+	/// <summary>Art scenes merged into this package's scene.</summary>
 	public List<string> Includes { get; } = [];
 
-	/// <summary>pending, ok, empty, existing, merged or failed.</summary>
+	/// <summary>pending, ok, empty, existing or failed.</summary>
 	public string Status { get; set; } = "pending";
 
 	public string? Error { get; set; }
@@ -49,37 +44,34 @@ public sealed class LevelResult
 
 /// <summary>
 /// Loads levels with AssetRipper in configurable batches and exports each
-/// requested scene as a single GLB, then renders its preview.
+/// requested scene as a streamed viewer package (shared asset library + cells).
 /// <para>
 /// Wintermute often splits an interior into an art scene (room shell) and a
 /// design overlay (loose props) stored in the next level file. A design scene
 /// has no mesh larger than <see cref="SceneProfile.OverlayMaxExtent"/>, so the
-/// runner merges it into the preceding art scene instead of exporting items
-/// floating in a void. The art GLB keeps its own name; overlays are marked
-/// <c>merged</c> in the manifest.
+/// runner exports it as a copy of the preceding art scene plus its own props
+/// instead of leaving items floating in a void. The package keeps the overlay's
+/// name; <see cref="LevelResult.Includes"/> records the base scene.
 /// </para>
 /// <para>
-/// Everything is checkpointed per level: the GLB is written to a temp file and
-/// moved into place, and <c>onLevelCompleted</c> fires immediately afterwards.
-/// Killing the process therefore never loses completed work or leaves a
-/// half-written GLB that a later run would mistake for a finished one.
+/// Everything is checkpointed per level: the package is written to a
+/// <c>.viewer.part</c> directory and moved into place by the exporter, and
+/// <c>onLevelCompleted</c> fires immediately afterwards. Killing the process
+/// therefore never loses completed work or leaves a half-written package that a
+/// later run would mistake for a finished one.
 /// </para>
 /// </summary>
 public sealed class ExportRunner
 {
 	private readonly Options _options;
-	private readonly BlenderRenderer? _renderer;
 	private readonly Dictionary<int, LevelEntry> _allById;
 	private readonly Dictionary<string, LevelEntry> _allByName;
-	private readonly ManifestState _previousManifest;
 
-	public ExportRunner(Options options, BlenderRenderer? renderer, IReadOnlyList<LevelEntry> allLevels)
+	public ExportRunner(Options options, IReadOnlyList<LevelEntry> allLevels)
 	{
 		_options = options;
-		_renderer = renderer;
 		_allById = allLevels.ToDictionary(level => level.Id);
 		_allByName = allLevels.ToDictionary(level => level.SceneName, StringComparer.OrdinalIgnoreCase);
-		_previousManifest = ManifestState.Load(options.OutputDirectory);
 	}
 
 	public IReadOnlyList<LevelResult> Run(
@@ -307,53 +299,22 @@ public sealed class ExportRunner
 		LevelResult? result,
 		Progress progress)
 	{
-		if (_options.ViewerPackage)
+		string packagePath = PackagePath(level);
+		if (!_options.Force && IsPackageComplete(packagePath))
 		{
-			string packagePath = PackagePath(level);
-			if (!_options.Force && IsPackageComplete(packagePath))
+			if (result is not null)
 			{
-				if (result is not null)
-				{
-					result.Status = "existing";
-					result.PackagePath = packagePath;
-					result.Bytes = DirectoryBytes(packagePath);
-					Console.WriteLine($"[{level.SceneName}] package exists  {Megabytes(result.Bytes):F1} MB (use --force to re-export)");
-					progress.Report();
-				}
-
-				return;
+				result.Status = "existing";
+				result.PackagePath = packagePath;
+				result.Bytes = DirectoryBytes(packagePath);
+				Console.WriteLine($"[{level.SceneName}] package exists  {Megabytes(result.Bytes):F1} MB (use --force to re-export)");
+				progress.Report();
 			}
 
-			ExportPackageAssets(level, assets, result, progress, []);
 			return;
 		}
 
-		string glbPath = GlbPath(level);
-
-		if (!_options.Force && _previousManifest.IsComplete(level.SceneName, [], glbPath))
-		{
-			if (_options.Validate && result is not null && !TryInspect(result))
-			{
-				result.Warnings.Add("Existing GLB was unreadable and is being re-exported");
-			}
-			else
-			{
-				if (result is not null)
-				{
-					result.Status = "existing";
-					result.GlbPath = glbPath;
-					result.Bytes = new FileInfo(glbPath).Length;
-					result.PreviewPath = Path.ChangeExtension(glbPath, ".png");
-					Console.WriteLine($"[{level.SceneName}] exists  {Megabytes(result.Bytes):F1} MB (use --force to re-export)");
-					RenderPreview(level, glbPath, result, force: false);
-					progress.Report();
-				}
-
-				return;
-			}
-		}
-
-		ExportAssets(level, assets, result, progress, [], forcePreview: true);
+		ExportPackageAssets(level, assets, result, progress, []);
 	}
 
 	/// <summary>Exports a design level as a copy of its preceding art scene plus its own props.</summary>
@@ -365,57 +326,18 @@ public sealed class ExportRunner
 		LevelResult? result,
 		Progress progress)
 	{
-		if (_options.ViewerPackage)
-		{
-			string packagePath = PackagePath(overlay);
-			string[] packageIncludes = [art.SceneName];
-			if (!_options.Force && IsPackageComplete(packagePath))
-			{
-				if (result is not null)
-				{
-					result.Status = "existing";
-					result.PackagePath = packagePath;
-					result.Bytes = DirectoryBytes(packagePath);
-					result.Includes.Clear();
-					result.Includes.AddRange(packageIncludes);
-					Console.WriteLine($"[{overlay.SceneName}] package exists  {Megabytes(result.Bytes):F1} MB (base {art.SceneName})");
-					progress.Report();
-				}
-
-				return true;
-			}
-
-			if (result is not null)
-			{
-				result.Includes.Clear();
-				result.Includes.AddRange(packageIncludes);
-			}
-
-			IEnumerable<IUnityObjectBase> packageAssets = artScene.Assets.Concat(overlayScene.Assets);
-			ExportPackageAssets(overlay, packageAssets, result, progress, packageIncludes);
-			return true;
-		}
-
-		string glbPath = GlbPath(overlay);
-		string pngPath = Path.ChangeExtension(glbPath, ".png");
-		string[] includes = [art.SceneName];
-
-		if (!_options.Force
-			&& _previousManifest.IsComplete(overlay.SceneName, includes, glbPath))
+		string packagePath = PackagePath(overlay);
+		string[] packageIncludes = [art.SceneName];
+		if (!_options.Force && IsPackageComplete(packagePath))
 		{
 			if (result is not null)
 			{
 				result.Status = "existing";
-				result.GlbPath = glbPath;
-				result.Bytes = new FileInfo(glbPath).Length;
-				result.PreviewPath = pngPath;
+				result.PackagePath = packagePath;
+				result.Bytes = DirectoryBytes(packagePath);
 				result.Includes.Clear();
-				result.Includes.AddRange(includes);
-				TryInspect(result);
-				Console.WriteLine(
-					$"[{overlay.SceneName}] exists  {Megabytes(result.Bytes):F1} MB " +
-					$"(base {art.SceneName})");
-				RenderPreview(overlay, glbPath, result, force: false);
+				result.Includes.AddRange(packageIncludes);
+				Console.WriteLine($"[{overlay.SceneName}] package exists  {Megabytes(result.Bytes):F1} MB (base {art.SceneName})");
 				progress.Report();
 			}
 
@@ -425,114 +347,12 @@ public sealed class ExportRunner
 		if (result is not null)
 		{
 			result.Includes.Clear();
-			result.Includes.AddRange(includes);
+			result.Includes.AddRange(packageIncludes);
 		}
 
-		IEnumerable<IUnityObjectBase> assets = artScene.Assets.Concat(overlayScene.Assets);
-		return ExportAssets(overlay, assets, result, progress, includes, forcePreview: true);
-	}
-
-	private bool ExportAssets(
-		LevelEntry level,
-		IEnumerable<IUnityObjectBase> assets,
-		LevelResult? result,
-		Progress progress,
-		IReadOnlyList<string> includes,
-		bool forcePreview)
-	{
-		string glbPath = GlbPath(level);
-		string tempPath = glbPath + ".part";
-		Stopwatch watch = Stopwatch.StartNew();
-
-		try
-		{
-			bool success = SceneGlbExporter.Export(assets, tempPath, LocalFileSystem.Instance, _options.AllLods, out int terrainCount);
-			if (terrainCount > 0)
-			{
-				Console.WriteLine($"[{level.SceneName}] added {terrainCount} terrain mesh(es)");
-			}
-
-			if (success && File.Exists(tempPath))
-			{
-				File.Move(tempPath, glbPath, overwrite: true);
-			}
-
-			watch.Stop();
-			if (result is not null)
-			{
-				result.ExportSeconds = watch.Elapsed.TotalSeconds;
-			}
-
-			if (!success || !File.Exists(glbPath))
-			{
-				DeleteQuietly(tempPath);
-				if (result is not null)
-				{
-					result.Status = "failed";
-					result.Error = "GlbModelExporter returned false";
-					Console.WriteLine($"[{level.SceneName}] FAILED: exporter returned false");
-					progress.Report();
-				}
-				else
-				{
-					Console.WriteLine($"[{level.SceneName}] FAILED: context art scene did not export");
-				}
-
-				return false;
-			}
-
-			long bytes = new FileInfo(glbPath).Length;
-			string suffix = includes.Count > 0 ? $" + {string.Join(" + ", includes)}" : string.Empty;
-
-			if (result is null)
-			{
-				Console.WriteLine($"[{level.SceneName}] {Megabytes(bytes):F1} MB in {watch.Elapsed.TotalSeconds:F1}s (context art){suffix}");
-				RenderPreview(level, glbPath, null, force: forcePreview);
-				return true;
-			}
-
-			result.GlbPath = glbPath;
-			result.Bytes = bytes;
-			TryInspect(result);
-
-			bool empty = result.Stats is { Meshes: 0 };
-			result.Status = empty ? "empty" : "ok";
-			if (empty)
-			{
-				result.Warnings.Add("GLB contains no meshes");
-			}
-			else if (result.Stats?.HasNonFiniteMeshBounds == true)
-			{
-				result.Warnings.Add("GLB position bounds contain NaN/Inf");
-			}
-
-			Console.WriteLine(
-				$"[{level.SceneName}] {Megabytes(result.Bytes):F1} MB in {result.ExportSeconds:F1}s " +
-				$"({result.Stats?.Meshes ?? 0} meshes, {result.Stats?.Triangles ?? 0:N0} tris, {result.Stats?.Materials ?? 0} materials){suffix}");
-
-			RenderPreview(level, glbPath, result, force: forcePreview);
-			progress.Report();
-			return true;
-		}
-		catch (Exception exception)
-		{
-			watch.Stop();
-			DeleteQuietly(tempPath);
-			if (result is not null)
-			{
-				result.ExportSeconds = watch.Elapsed.TotalSeconds;
-				result.Status = "failed";
-				result.Error = exception.Message;
-				Console.WriteLine($"[{level.SceneName}] FAILED: {exception.Message}");
-				progress.Report();
-			}
-			else
-			{
-				Console.WriteLine($"[{level.SceneName}] FAILED (context art): {exception.Message}");
-			}
-
-			return false;
-		}
+		IEnumerable<IUnityObjectBase> packageAssets = artScene.Assets.Concat(overlayScene.Assets);
+		ExportPackageAssets(overlay, packageAssets, result, progress, packageIncludes);
+		return true;
 	}
 
 	private bool ExportPackageAssets(
@@ -559,6 +379,11 @@ public sealed class ExportRunner
 				result.ExportSeconds = watch.Elapsed.TotalSeconds;
 				result.PackagePath = package.Path;
 				result.Bytes = package.Bytes;
+				result.Cells = package.Cells;
+				result.Instances = package.Instances;
+				result.Assets = package.Assets;
+				result.Lods = package.Lods;
+				result.Triangles = package.Triangles;
 				result.Status = package.Triangles == 0 ? "empty" : "ok";
 				if (package.Triangles == 0)
 				{
@@ -612,104 +437,6 @@ public sealed class ExportRunner
 		Directory.Exists(path)
 			? Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories).Sum(file => new FileInfo(file).Length)
 			: 0;
-
-	private void RenderPreview(LevelEntry level, string glbPath, LevelResult? result, bool force)
-	{
-		if (_renderer is null || !File.Exists(glbPath))
-		{
-			return;
-		}
-
-		string pngPath = Path.ChangeExtension(glbPath, ".png");
-		if (result is not null)
-		{
-			result.PreviewPath = pngPath;
-		}
-
-		if (!force && !_options.Force && File.Exists(pngPath))
-		{
-			return;
-		}
-
-		string tempPath = pngPath + ".part.png";
-
-		try
-		{
-			PreviewResult preview = _renderer.Render(glbPath, tempPath, _options.PreviewSize, _options.PreviewSamples, _options.PreviewMargin);
-			if (result is not null)
-			{
-				result.PreviewSeconds = preview.Seconds;
-				result.AlphaMaterials = preview.AlphaMaterials;
-			}
-
-			if (!preview.Success)
-			{
-				DeleteQuietly(tempPath);
-				if (result is not null)
-				{
-					result.Warnings.Add($"Preview failed: {preview.Error}");
-				}
-
-				Console.WriteLine($"[{level.SceneName}] preview FAILED: {preview.Error}");
-				return;
-			}
-
-			File.Move(tempPath, pngPath, overwrite: true);
-			Console.WriteLine($"[{level.SceneName}] preview {preview.Seconds:F1}s (alphaMats={preview.AlphaMaterials})");
-		}
-		catch (Exception exception)
-		{
-			DeleteQuietly(tempPath);
-			if (result is not null)
-			{
-				result.Warnings.Add($"Preview failed: {exception.Message}");
-			}
-
-			Console.WriteLine($"[{level.SceneName}] preview FAILED: {exception.Message}");
-		}
-	}
-
-	/// <summary>Returns false when the file exists but is not a readable GLB.</summary>
-	private bool TryInspect(LevelResult result)
-	{
-		if (!_options.Validate || result.GlbPath is null)
-		{
-			return true;
-		}
-
-		try
-		{
-			result.Stats = GlbInspector.Inspect(result.GlbPath);
-			return true;
-		}
-		catch (Exception exception)
-		{
-			result.Warnings.Add($"Inspection failed: {exception.Message}");
-			return false;
-		}
-	}
-
-	private string GlbPath(LevelEntry level) =>
-		Path.Combine(_options.OutputDirectory, level.SceneName + ".glb");
-
-	private static void DeleteQuietly(string path)
-	{
-		try
-		{
-			if (File.Exists(path))
-			{
-				File.Delete(path);
-			}
-		}
-		catch (IOException)
-		{
-			// A stale temp file is harmless; the next run overwrites it.
-		}
-		catch (UnauthorizedAccessException)
-		{
-			// Same as above.
-		}
-	}
 
 	private static double PeakWorkingSetMegabytes()
 	{

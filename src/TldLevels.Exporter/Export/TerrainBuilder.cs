@@ -11,7 +11,6 @@ using AssetRipper.Export.Modules.Textures;
 using SharpGLTF.Geometry;
 using SharpGLTF.Geometry.VertexTypes;
 using SharpGLTF.Materials;
-using SharpGLTF.Scenes;
 using SharpGLTF.Transforms;
 using System.Numerics;
 
@@ -30,58 +29,6 @@ namespace TldLevels.Exporter.Export;
 /// </summary>
 public static class TerrainBuilder
 {
-	/// <summary>
-	/// Adds one mesh per distinct non-empty TerrainData referenced by a Terrain
-	/// component. Returns how many terrains were added.
-	/// </summary>
-	public static int AddTerrains(SceneBuilder sceneBuilder, IEnumerable<IUnityObjectBase> assets)
-	{
-		HashSet<ITerrainData> seen = [];
-		int added = 0;
-
-		foreach (IUnityObjectBase asset in assets)
-		{
-			if (asset is not ITerrain terrain)
-			{
-				continue;
-			}
-
-			ITerrainData? data = terrain.TerrainDataP;
-			string terrainName = terrain.GameObject_C2P?.Name.String ?? "<unnamed>";
-			if (data is null)
-			{
-				Console.WriteLine($"[terrain] {terrainName}: no TerrainData");
-				continue;
-			}
-
-			if (data.Heightmap.Heights.Count == 0)
-			{
-				Console.WriteLine($"[terrain] {terrainName}: TerrainData '{data.Name}' has no heights");
-				continue;
-			}
-
-
-			if (!seen.Add(data))
-			{
-				Console.WriteLine($"[terrain] {terrainName}: shares TerrainData '{data.Name}'");
-				continue;
-			}
-
-			bool clipZeroHeightCells = IsAuxiliaryWaterTerrain(terrainName);
-			Console.WriteLine(
-				$"[terrain] {terrainName}: '{data.Name}' {data.Heightmap.Width}x{data.Heightmap.Height} " +
-				$"samples {data.Heightmap.Heights.Count} res {data.Heightmap.Resolution} scale {data.Heightmap.Scale.X:F1},{data.Heightmap.Scale.Y:F1},{data.Heightmap.Scale.Z:F1}" +
-				(clipZeroHeightCells ? " (zero-height cells clipped)" : string.Empty));
-
-			if (TryAdd(sceneBuilder, terrain, data, clipZeroHeightCells))
-			{
-				added++;
-			}
-		}
-
-		return added;
-	}
-
 	private static bool IsAuxiliaryWaterTerrain(string name) =>
 		name.Contains("water", StringComparison.OrdinalIgnoreCase)
 		|| name.Contains("river", StringComparison.OrdinalIgnoreCase)
@@ -91,25 +38,8 @@ public static class TerrainBuilder
 		|| name.Contains("creek", StringComparison.OrdinalIgnoreCase)
 		|| name.Contains("ice", StringComparison.OrdinalIgnoreCase);
 
-	private static bool TryAdd(SceneBuilder sceneBuilder, ITerrain terrain, ITerrainData data, bool clipZeroHeightCells)
-	{
-		if (!TryBuild(terrain, data, clipZeroHeightCells, out MeshBuilder<VertexPosition, VertexTexture1, VertexEmpty>? meshBuilder, out AffineTransform worldTransform, out string name))
-		{
-			return false;
-		}
-
-		NodeBuilder node = new(name)
-		{
-			LocalTransform = worldTransform,
-		};
-
-		sceneBuilder.AddRigidMesh(meshBuilder, node);
-		return true;
-	}
-
 	/// <summary>
-	/// Yields terrain landscapes as standalone draw items, matching the meshes
-	/// that <see cref="AddTerrains"/> adds to a whole-scene export.
+	/// Yields terrain landscapes as standalone draw items for viewer packages.
 	/// </summary>
 	public static IEnumerable<GlbDrawMesh> BuildDrawMeshes(IEnumerable<IUnityObjectBase> assets)
 	{

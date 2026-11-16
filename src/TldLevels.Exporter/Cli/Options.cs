@@ -26,34 +26,14 @@ public sealed class Options
 
 	public bool Force { get; set; }
 
-	public bool Validate { get; set; } = true;
-
-	public bool Preview { get; set; } = true;
-
 	/// <summary>Merge design-overlay scenes into their preceding art scene.</summary>
 	public bool MergeOverlays { get; set; } = true;
 
-	/// <summary>Keep all Unity LOD levels instead of only the highest-detail LOD0.</summary>
-	public bool AllLods { get; set; }
-
-	/// <summary>Write a streamed viewer package (shared asset library + cells) instead of a GLB.</summary>
-	public bool ViewerPackage { get; set; }
-
-	/// <summary>Cell edge length in metres for viewer packages.</summary>
+	/// <summary>Cell edge length in metres.</summary>
 	public float CellSize { get; set; } = 256f;
 
 	/// <summary>Explicit design/base scene associations, expressed as overlayId=baseId.</summary>
 	public Dictionary<int, int> SceneMerges { get; } = [];
-
-	public string? BlenderPath { get; set; }
-
-	public string? PreviewScript { get; set; }
-
-	public int PreviewSize { get; set; } = 2048;
-
-	public int PreviewSamples { get; set; } = 16;
-
-	public double PreviewMargin { get; set; } = 1.05;
 
 	public bool DryRun { get; set; }
 
@@ -90,50 +70,17 @@ public sealed class Options
 				case "--force":
 					options.Force = true;
 					break;
-				case "--validate":
-					options.Validate = RequireBool(args, ref i, arg);
-					break;
-				case "--no-validate":
-					options.Validate = false;
-					break;
-				case "--preview":
-					options.Preview = RequireBool(args, ref i, arg);
-					break;
-				case "--no-preview":
-					options.Preview = false;
-					break;
 				case "--merge-overlays":
 					options.MergeOverlays = RequireBool(args, ref i, arg);
 					break;
 				case "--no-merge-overlays":
 					options.MergeOverlays = false;
 					break;
-				case "--all-lods":
-					options.AllLods = true;
-					break;
-				case "--viewer-package":
-					options.ViewerPackage = true;
-					break;
 				case "--cell-size":
 					options.CellSize = RequirePositiveFloat(args, ref i, arg);
 					break;
 				case "--merge-scene":
 					ParseSceneMerge(options, RequireValue(args, ref i, arg), arg);
-					break;
-				case "--blender":
-					options.BlenderPath = RequireValue(args, ref i, arg);
-					break;
-				case "--preview-script":
-					options.PreviewScript = RequireValue(args, ref i, arg);
-					break;
-				case "--preview-size":
-					options.PreviewSize = RequirePositiveInt(args, ref i, arg);
-					break;
-				case "--preview-samples":
-					options.PreviewSamples = RequirePositiveInt(args, ref i, arg);
-					break;
-				case "--preview-margin":
-					options.PreviewMargin = RequirePositiveDouble(args, ref i, arg);
 					break;
 				case "--dry-run":
 					options.DryRun = true;
@@ -147,33 +94,22 @@ public sealed class Options
 	}
 
 	public static string Usage => """
-		TldLevels.Exporter - export The Long Dark Wintermute levels to GLB (+ previews)
+		TldLevels.Exporter - export The Long Dark Wintermute levels as streamed viewer packages
 
 		Usage: TldLevels.Exporter [options]
 
 		  --input <dir>            Campaign data directory
 		                           default: \\VBoxSvr\TheLongDark\tld_dlc\wintermute\tld_Data
-		  --output <dir>           Where GLBs, PNGs, manifest and logs are written
+		  --output <dir>           Where level.viewer packages, shared assets, manifest and logs are written
 		                           default: \\VBoxSvr\TLDLevels\tldlevels\levels
 		  --levels <spec>          all | 9 | 2-40,76,120        default: all (level0 excluded)
 		  --batch-size <n>         Levels per AssetRipper load     default: 1
 		  --skip-stubs             Skip levels smaller than 20 KB  default: false
-		  --force                  Re-export levels whose GLB exists
-		  --validate <bool>        Inspect each GLB after writing   default: true
-		  --no-validate            Same as --validate false
-		  --preview <bool>         Render a top-down PNG           default: true
-		  --no-preview             Same as --preview false
+		  --force                  Re-export packages that already exist
 		  --merge-overlays <bool>  Merge prop-only design scenes into their art scene  default: true
 		  --no-merge-overlays      Export each level file on its own instead
-		  --all-lods               Keep LOD1/LOD2/etc. in GLB exports (default: LOD0 only)
-		  --viewer-package         Write level.viewer packages (shared assets + cells)
-		  --cell-size <m>          Viewer package cell edge length  default: 256
+		  --cell-size <m>          Cell edge length               default: 256
 		  --merge-scene <a=b>      Export scene a with base scene b (repeatable)
-		  --blender <exe>          Blender executable (auto-detected when omitted)
-		  --preview-script <path>  Render script (auto-detected when omitted)
-		  --preview-size <px>      Preview resolution               default: 2048
-		  --preview-samples <n>    Cycles samples per preview        default: 16
-		  --preview-margin <f>     Fraction of frame margin          default: 1.05
 		  --dry-run                List what would be exported, then exit
 		  -h, --help               Show this text
 
@@ -196,17 +132,6 @@ public sealed class Options
 		if (!int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value) || value <= 0)
 		{
 			throw new ArgumentException($"Invalid positive integer for {option}: '{text}'");
-		}
-
-		return value;
-	}
-
-	private static double RequirePositiveDouble(string[] args, ref int index, string option)
-	{
-		string text = RequireValue(args, ref index, option);
-		if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double value) || value <= 0)
-		{
-			throw new ArgumentException($"Invalid positive number for {option}: '{text}'");
 		}
 
 		return value;

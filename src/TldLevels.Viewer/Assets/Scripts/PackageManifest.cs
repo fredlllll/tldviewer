@@ -6,7 +6,8 @@ namespace TldLevels.Viewer
 {
     /// <summary>
     /// On-disk description of a streamed level package written by the exporter
-    /// (<c>--viewer-package</c>). The manifest is the only source of truth for
+    /// The exporter writes this file inside every <c>levelN.viewer</c> package.
+    /// The manifest is the only source of truth for
     /// which LOD files exist; the viewer never probes the file system for
     /// optional LODs.
     /// </summary>
