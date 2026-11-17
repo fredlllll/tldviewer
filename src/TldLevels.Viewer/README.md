@@ -68,8 +68,26 @@ viewport size, clamped to 0.8–1.5 so text never becomes unreadable. **Hide**
 collapses the panel to its title bar, and **Settings** hides the three path
 fields when vertical space is tight.
 
-The UI smoke test opens the viewer scene and checks the `UIDocument` references,
-the theme, the panel scale mode and every element name that `ViewerUi` binds:
+The UI and the fly camera share the keyboard, so they take turns:
+
+- while a text field has focus the camera ignores WASD, the scroll wheel and the
+  right mouse button, so typing a path never moves the camera;
+- starting to look (right mouse button) blurs the focused field, and the panel
+  stops picking clicks while the cursor is locked, so a right-click over a path
+  field cannot open its text menu or steal the keys;
+- clicking anywhere that is not a text field gives the keyboard back to the
+  camera.
+
+## Scene
+
+`Viewer.unity` contains the `Viewer Camera` (with `FlyCamera`), the `Sun`
+directional light and the `Viewer Bootstrap` object, so the Game view renders
+the background before Play and the camera is available to the level list. The
+bootstrap only fills in anything missing at runtime and starts `LevelLoader`.
+
+The UI smoke test opens the viewer scene and checks the camera and sun, the
+`UIDocument` references, the theme, the panel scale mode and every element name
+that `ViewerUi` binds:
 
 ```powershell
 Unity.exe -batchmode -nographics `

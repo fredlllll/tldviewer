@@ -96,11 +96,20 @@ public sealed class LevelLoader : MonoBehaviour
 
         ui.SetFrameEnabled(IsSomethingLoaded() && !isLoading);
 
-        var flyCamera = Camera.main != null ? Camera.main.GetComponent<FlyCamera>() : null;
+        bool pointerLocked = Cursor.lockState == CursorLockMode.Locked;
+        ui.SetPointerLocked(pointerLocked);
+
+        FlyCamera flyCamera = Camera.main != null ? Camera.main.GetComponent<FlyCamera>() : null;
         if (flyCamera != null)
         {
-            ui.SetHint(
-                $"WASD move · Q/E vertical · RMB look · wheel speed ({flyCamera.MoveSpeed:F0} m/s) · Shift boost");
+            // A focused text field owns the keyboard; the camera must not also
+            // read WASD or swallow the scroll wheel.
+            flyCamera.InputBlocked = ui.IsTextInputFocused;
+
+            float speed = flyCamera.MoveSpeed;
+            ui.SetHint(pointerLocked
+                ? $"WASD move · Q/E vertical · mouse look · wheel speed ({speed:F0} m/s) · Esc release cursor"
+                : $"WASD move · Q/E vertical · RMB look · wheel speed ({speed:F0} m/s) · Shift boost");
         }
 
         ui.SetStatus(status);

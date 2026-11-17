@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using TldLevels.Viewer;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -53,6 +54,28 @@ public static class ViewerUiSmokeTest
         try
         {
             EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
+
+            Camera camera = UnityEngine.Object.FindFirstObjectByType<Camera>();
+            if (camera == null)
+            {
+                throw new InvalidOperationException("Viewer scene has no camera; it must exist before Play.");
+            }
+
+            if (camera.GetComponent<FlyCamera>() == null)
+            {
+                throw new InvalidOperationException("Viewer camera has no FlyCamera component.");
+            }
+
+            if (Mathf.Abs(camera.farClipPlane - ViewerBootstrap.FarClipPlane) > 1f)
+            {
+                throw new InvalidOperationException($"Viewer camera far clip is {camera.farClipPlane}, expected 10000.");
+            }
+
+            Light sun = UnityEngine.Object.FindFirstObjectByType<Light>();
+            if (sun == null || sun.type != LightType.Directional)
+            {
+                throw new InvalidOperationException("Viewer scene has no directional sun light.");
+            }
 
             UIDocument document = UnityEngine.Object.FindFirstObjectByType<UIDocument>();
             if (document == null)

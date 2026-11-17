@@ -48,6 +48,7 @@ public sealed class ViewerUi : MonoBehaviour
     private Button settingsToggleButton;
 
     private bool ready;
+    private bool pointerLocked;
     private string lastStatus;
     private string lastHint;
 
@@ -89,10 +90,64 @@ public sealed class ViewerUi : MonoBehaviour
         set => filterField?.SetValueWithoutNotify(value ?? string.Empty);
     }
 
-    public bool IsTextInputFocused =>
-        root != null && root.panel != null && root.panel.focusController.focusedElement is TextField;
+    public bool IsTextInputFocused
+    {
+        get
+        {
+            VisualElement focused = FocusedElement();
+            if (focused == null)
+            {
+                return false;
+            }
+
+            return focused is TextField || focused.GetFirstAncestorOfType<TextField>() != null;
+        }
+    }
 
     public bool IsReady => ready;
+
+    public bool IsPointerLocked => pointerLocked;
+
+    /// <summary>Releases keyboard focus, for example before the camera grabs the mouse.</summary>
+    public void ClearFocus()
+    {
+        FocusedElement()?.Blur();
+    }
+
+    /// <summary>
+    /// While the mouse is captured for looking, the panel must not pick clicks or
+    /// take the keyboard; otherwise right-click opens a text field's context menu
+    /// and WASD ends up in a path field.
+    /// </summary>
+    public void SetPointerLocked(bool locked)
+    {
+        if (locked == pointerLocked)
+        {
+            return;
+        }
+
+        pointerLocked = locked;
+
+        if (locked)
+        {
+            ClearFocus();
+        }
+
+        if (root != null)
+        {
+            root.pickingMode = locked ? PickingMode.Ignore : PickingMode.Position;
+        }
+    }
+
+    private VisualElement FocusedElement()
+    {
+        if (root == null || root.panel == null)
+        {
+            return null;
+        }
+
+        return root.panel.focusController.focusedElement as VisualElement;
+    }
 
     public void Initialize()
     {
@@ -194,6 +249,12 @@ public sealed class ViewerUi : MonoBehaviour
         panelToggleButton.clicked += TogglePanel;
         settingsToggleButton.clicked += ToggleSettings;
 
+        // Clicking anywhere that is not a text field gives the keyboard back to
+        // the camera instead of leaving a field silently focused.
+        root.RegisterCallback<PointerDownEvent>(OnPointerDown, TrickleDown.TrickleDown);
+        root.RegisterCallback<KeyDownEvent>(OnKeyDown, TrickleDown.TrickleDown);
+        root.RegisterCallback<KeyUpEvent>(OnKeyUp, TrickleDown.TrickleDown);
+
         SetExporterWarning(false);
         SetLevelEmpty(null);
         SetBusy(false);
@@ -201,7 +262,57 @@ public sealed class ViewerUi : MonoBehaviour
         SetStreamer(false, string.Empty, 0f, 0f);
 
         ready = true;
+        root.pickingMode = pointerLocked ? PickingMode.Ignore : PickingMode.Position;
         UpdateScale();
+    }
+
+    private void OnPointerDown(PointerDownEvent evt)
+    {
+        // Right mouse is the camera-look button; it must never open a text
+        // field's context menu or leave a field focused behind the cursor lock.
+        if (evt.button == 1)
+        {
+            evt.StopPropagation();
+            ClearFocus();
+            return;
+        }
+
+        if (evt.target is not VisualElement)
+        {
+            return;
+        }
+
+        var target = (VisualElement)evt.target;
+        if (target is TextField || target.GetFirstAncestorOfType<TextField>() != null)
+        {
+            return;
+        }
+
+        ClearFocus();
+    }
+
+    private void OnKeyDown(KeyDownEvent evt)
+    {
+        if (pointerLocked)
+        {
+            evt.StopPropagation();
+            return;
+        }
+
+        // With nothing focused, Tab would jump the focus ring onto the first
+        // path field, which then swallows WASD while flying.
+        if (evt.keyCode == KeyCode.Tab && !IsTextInputFocused)
+        {
+            evt.StopPropagation();
+        }
+    }
+
+    private void OnKeyUp(KeyUpEvent evt)
+    {
+        if (pointerLocked)
+        {
+            evt.StopPropagation();
+        }
     }
 
     private void UpdateScale()

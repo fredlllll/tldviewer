@@ -381,6 +381,10 @@ instances the shared meshes and selects a LOD per instance at distance.
   and `ViewerUI.uss`. The panel uses percentage sizing inside the viewport with
   a `ConstantPixelSize` scale clamped to 0.8–1.5, so it fits small Game views
   without shrinking text into illegibility.
+- **Shared keyboard.** A focused text field blocks the fly camera, capturing the
+  mouse blurs the field and disables panel picking, and clicking outside a field
+  returns the keyboard to the camera. `Viewer.unity` also owns the camera and
+  sun, so the Game view renders before Play instead of building them at runtime.
 
 ## 9. Milestones
 

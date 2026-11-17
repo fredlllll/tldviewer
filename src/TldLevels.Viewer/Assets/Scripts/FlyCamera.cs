@@ -11,6 +11,12 @@ public sealed class FlyCamera : MonoBehaviour
     private float yaw;
     private float pitch;
 
+    /// <summary>
+    /// Set while the UI owns the keyboard (a text field has focus) or the
+    /// pointer is locked, so WASD goes to the field instead of the camera.
+    /// </summary>
+    public bool InputBlocked { get; set; }
+
     private void Start()
     {
         Vector3 euler = transform.eulerAngles;
@@ -25,15 +31,21 @@ public sealed class FlyCamera : MonoBehaviour
 
     private void Update()
     {
-        if (Input.GetMouseButtonDown(1))
-        {
-            Cursor.lockState = CursorLockMode.Locked;
-            Cursor.visible = false;
-        }
         if (Input.GetKeyDown(KeyCode.Escape))
         {
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;
+        }
+
+        if (InputBlocked)
+        {
+            return;
+        }
+
+        if (Input.GetMouseButtonDown(1))
+        {
+            Cursor.lockState = CursorLockMode.Locked;
+            Cursor.visible = false;
         }
 
         if (Cursor.lockState == CursorLockMode.Locked)
