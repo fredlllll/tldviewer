@@ -45,7 +45,6 @@ public static class ManifestWriter
 			scene = result.Level.SceneName,
 			source = result.Level.SourcePath,
 			sourceBytes = result.Level.SizeBytes,
-			stub = result.Level.IsStub,
 			package = Relative(outputDirectory, result.PackagePath),
 			bytes = result.Bytes,
 			cells = result.Cells,

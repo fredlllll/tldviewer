@@ -22,8 +22,6 @@ public sealed class Options
 	/// <summary>Levels loaded per AssetRipper instance.</summary>
 	public int BatchSize { get; set; } = 1;
 
-	public bool SkipStubs { get; set; }
-
 	public bool Force { get; set; }
 
 	/// <summary>Merge design-overlay scenes into their preceding art scene.</summary>
@@ -64,9 +62,6 @@ public sealed class Options
 				case "--batch-size":
 					options.BatchSize = RequirePositiveInt(args, ref i, arg);
 					break;
-				case "--skip-stubs":
-					options.SkipStubs = true;
-					break;
 				case "--force":
 					options.Force = true;
 					break;
@@ -104,7 +99,6 @@ public sealed class Options
 		                           default: \\VBoxSvr\TLDLevels\tldlevels\levels
 		  --levels <spec>          all | 9 | 2-40,76,120        default: all (level0 excluded)
 		  --batch-size <n>         Levels per AssetRipper load     default: 1
-		  --skip-stubs             Skip levels smaller than 20 KB  default: false
 		  --force                  Re-export packages that already exist
 		  --merge-overlays <bool>  Merge prop-only design scenes into their art scene  default: true
 		  --no-merge-overlays      Export each level file on its own instead

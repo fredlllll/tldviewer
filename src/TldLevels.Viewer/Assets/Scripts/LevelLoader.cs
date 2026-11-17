@@ -22,7 +22,6 @@ public sealed class LevelLoader : MonoBehaviour
     private const string ExporterPathKey = "TldLevels.Viewer.ExporterPath";
     private const string DefaultExportFolder = @"\\VBoxSvr\TLDLevels\tldlevels\levels";
     private const string DefaultGameFolder = @"\\VBoxSvr\TheLongDark\tld_dlc\wintermute\tld_Data";
-    private const long StubThresholdBytes = 20 * 1024;
 
     private static readonly Color ExportedColor = new Color(0.62f, 0.90f, 0.62f);
     private static readonly Color ConvertColor = new Color(1.00f, 0.82f, 0.52f);
@@ -164,7 +163,7 @@ public sealed class LevelLoader : MonoBehaviour
         {
             foreach (string file in Directory.GetFiles(gameFolder))
             {
-                // Same naming rule and stub threshold as the exporter's LevelCatalog.
+                // Same naming rule as the exporter's LevelCatalog.
                 string name = Path.GetFileName(file);
                 if (!name.StartsWith("level", StringComparison.OrdinalIgnoreCase))
                     continue;
@@ -180,7 +179,6 @@ public sealed class LevelLoader : MonoBehaviour
                     SceneName = name,
                     SourcePath = file,
                     SizeBytes = size,
-                    IsStub = size < StubThresholdBytes,
                 });
             }
         }
@@ -454,7 +452,6 @@ public sealed class LevelLoader : MonoBehaviour
         public string SceneName;
         public string SourcePath;
         public long SizeBytes;
-        public bool IsStub;
         public bool Exported;
         public string ButtonLabel { get; private set; }
 
@@ -462,9 +459,7 @@ public sealed class LevelLoader : MonoBehaviour
 
         public void UpdateLabel()
         {
-            ButtonLabel =
-                $"{SceneName}   {(Exported ? "exported" : "convert")}   {Megabytes:F1} MB" +
-                (IsStub ? "  (stub)" : string.Empty);
+            ButtonLabel = $"{SceneName}   {(Exported ? "exported" : "convert")}   {Megabytes:F1} MB";
         }
     }
 }

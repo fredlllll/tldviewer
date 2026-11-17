@@ -35,8 +35,8 @@ internal static class Program
 		IReadOnlyList<LevelEntry> allLevels;
 		try
 		{
-			levels = LevelCatalog.Discover(options.InputDirectory, options.LevelSpec, options.SkipStubs);
-			allLevels = LevelCatalog.Discover(options.InputDirectory, levelSpec: null, skipStubs: false);
+			levels = LevelCatalog.Discover(options.InputDirectory, options.LevelSpec);
+			allLevels = LevelCatalog.Discover(options.InputDirectory, levelSpec: null);
 		}
 		catch (Exception exception) when (exception is DirectoryNotFoundException or FormatException or IOException or UnauthorizedAccessException)
 		{
@@ -122,15 +122,14 @@ internal static class Program
 	private static void PrintPlan(IReadOnlyList<LevelEntry> levels, Options options)
 	{
 		long totalSource = levels.Sum(level => level.SizeBytes);
-		int stubs = levels.Count(level => level.IsStub);
 
 		Console.WriteLine($"Would export {levels.Count} level(s) from {options.InputDirectory}");
 		Console.WriteLine($"Output: {options.OutputDirectory}");
-		Console.WriteLine($"Source size: {Megabytes(totalSource):F1} MB, stubs: {stubs}");
+		Console.WriteLine($"Source size: {Megabytes(totalSource):F1} MB");
 
 		foreach (LevelEntry level in levels)
 		{
-			Console.WriteLine($"  {level.SceneName,-10} {Megabytes(level.SizeBytes),8:F1} MB{(level.IsStub ? "  (stub)" : string.Empty)}");
+			Console.WriteLine($"  {level.SceneName,-10} {Megabytes(level.SizeBytes),8:F1} MB");
 		}
 	}
 

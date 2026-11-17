@@ -67,8 +67,8 @@ dotnet run --project src\TldLevels.Exporter -c Release -- --levels 9
 # several levels
 dotnet run --project src\TldLevels.Exporter -c Release -- --levels 2-40
 
-# everything, skipping chapter stubs
-dotnet run --project src\TldLevels.Exporter -c Release -- --levels all --skip-stubs
+# everything
+dotnet run --project src\TldLevels.Exporter -c Release -- --levels all
 ```
 
 ### Options
@@ -78,7 +78,6 @@ dotnet run --project src\TldLevels.Exporter -c Release -- --levels all --skip-st
 --output <dir>           default: \\VBoxSvr\TLDLevels\tldlevels\levels
 --levels <spec>          all | 9 | 2-40,76,120    default: all (level0 excluded)
 --batch-size <n>         levels per AssetRipper load   default: 1
---skip-stubs             skip levels smaller than 20 KB
 --force                  re-export packages that already exist
 --merge-overlays <bool>  add the preceding art scene to design-level exports  default: true
 --no-merge-overlays      export each level file on its own

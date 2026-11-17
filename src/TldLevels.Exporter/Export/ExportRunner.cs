@@ -137,7 +137,7 @@ public sealed class ExportRunner
 
 		void AddNeighbour(int id)
 		{
-			if (_allById.TryGetValue(id, out LevelEntry? level) && !level.IsStub && ids.Add(id))
+			if (_allById.TryGetValue(id, out LevelEntry? level) && ids.Add(id))
 			{
 				loadLevels.Add(level);
 			}

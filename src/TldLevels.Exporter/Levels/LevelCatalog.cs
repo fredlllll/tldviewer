@@ -4,17 +4,14 @@ using System.Text.RegularExpressions;
 namespace TldLevels.Exporter.Levels;
 
 /// <summary>A serialized Unity level file such as <c>level9</c>.</summary>
-public sealed record LevelEntry(int Id, string SceneName, string SourcePath, long SizeBytes, bool IsStub);
+public sealed record LevelEntry(int Id, string SceneName, string SourcePath, long SizeBytes);
 
 public static partial class LevelCatalog
 {
-	/// <summary>Files below this size are chapter stubs with no usable geometry.</summary>
-	public const long StubThresholdBytes = 20 * 1024;
-
 	[GeneratedRegex(@"^level(\d+)$", RegexOptions.CultureInvariant)]
 	private static partial Regex LevelFilePattern();
 
-	public static IReadOnlyList<LevelEntry> Discover(string inputDirectory, string? levelSpec, bool skipStubs)
+	public static IReadOnlyList<LevelEntry> Discover(string inputDirectory, string? levelSpec)
 	{
 		if (!Directory.Exists(inputDirectory))
 		{
@@ -46,13 +43,7 @@ public static partial class LevelCatalog
 			}
 
 			long size = new FileInfo(file).Length;
-			bool isStub = size < StubThresholdBytes;
-			if (isStub && skipStubs)
-			{
-				continue;
-			}
-
-			levels.Add(new LevelEntry(id, name, file, size, isStub));
+			levels.Add(new LevelEntry(id, name, file, size));
 		}
 
 		levels.Sort(static (a, b) => a.Id.CompareTo(b.Id));

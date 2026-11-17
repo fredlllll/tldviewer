@@ -22,7 +22,6 @@ asset/texture library, for the Unity viewer in `src/TldLevels.Viewer`.
 | Campaign data | `\\VBoxSvr\TheLongDark\tld_dlc\wintermute\tld_Data` — **250 level files** (`level0`…`level249`) |
 | Level files | 1.89 GB (`levelN` + `levelN.resS`) |
 | Whole campaign data | 9.58 GB |
-| Stub levels | 83 files < 20 KB → **166 meaningful levels** |
 | Output volume | `\\VBoxSvr\TLDLevels`, 110 GB free |
 | Free disk (C:) | 404 GB |
 | RAM / CPU | 23.1 GB / Ryzen 5 3600XT (6 cores) |
@@ -114,7 +113,7 @@ If the tool ever needs to stay non-GPL, switch to route A (prebuilt exe as a sep
 - Enumerate `level\d+` files (no extension) under the input directory.
 - Parse the numeric id; keep the file path.
 - Skip `level0` (menu) by default.
-- Classify `stub` when file size < 20 KB; still exportable, but reported separately.
+- Treat every level file equally; small files can still contain a few props.
 - Optional explicit selection: `--levels 9`, `--levels 2-40,76,120`.
 
 ### 6.2 Load + export
@@ -203,7 +202,6 @@ per-level counts (cells, instances, assets, triangles, LODs) in the run
       "scene": "level1",
       "source": "Z:\\tld_dlc\\wintermute\\tld_Data\\level1",
       "sourceBytes": 1234567,
-      "stub": false,
       "package": "level1.viewer",
       "bytes": 4100000,
       "cells": 344,
@@ -230,7 +228,6 @@ TldLevels.Exporter [options]
   --output <dir>           default: \\VBoxSvr\TLDLevels\tldlevels\levels
   --levels <spec>          all | 9 | 2-40,76,120        (default: all, level0 excluded)
   --batch-size <n>         levels per loader instance   (default: 1)
-  --skip-stubs             skip files < 20 KB           (default: false)
   --force                  re-export existing packages
   --dry-run                list what would be exported
   --merge-overlays <bool>  add the preceding art scene to design-level exports (default: true)
@@ -386,7 +383,7 @@ instances the shared meshes and selects a LOD per instance at distance.
 |---|---|---|
 | **M0** | `git init`, submodule pinned to 2.0.0, solution builds, `nuget.config`, `.gitignore`, GPL-3.0 LICENSE | **done** |
 | **M1** | CLI + discovery + loader + viewer package export + run manifest + shared asset library; `level9` golden test | **done** |
-| **M2** | Batch export of all levels; stub classification; failure list; full manifest | **done** (12 levels verified: 1–10, 111, 118) |
+| **M2** | Batch export of all levels; failure list; full manifest | **done** (12 levels verified: 1–10, 111, 118) |
 | **M3** | QA pass: viewer review, terrain/material fixes, level id → chapter name mapping, large-scene handling | **in progress** |
 | **M4** (opt.) | Parallel batches, incremental re-runs, mesh simplification/Draco | planned |
 
@@ -399,7 +396,7 @@ instances the shared meshes and selects a LOD per instance at distance.
 | Batch memory growth | OOM / slowdown | Default batch size 1; expose `--batch-size`; fall back to one level at a time on OOM. |
 | AssetRipper drift | Build/API breakage | Submodule pinned to tag 2.0.0, no floating master. |
 | IL2CPP scripts not reconstructed | No script data in output | Accepted; geometry/materials do not depend on it. |
-| Stub levels | Noise in output | `--skip-stubs` + manifest classification. |
+| Tiny level files | Easy to mistake for empty scenes | Treated like every other level; export and check the package. |
 | GPL obligations | Distribution constraints | GPL-3.0 repo + unmodified submodule; or route A for a non-linked tool. |
 
 ## 11. Open questions
@@ -407,7 +404,7 @@ instances the shared meshes and selects a LOD per instance at distance.
 1. Does `--batch-size 8` meaningfully reduce total time without excessive memory? Measure peak working set.
 2. Do the largest levels (`level244`, `level248`, `level231`, `level215`) stay within practical cell/package sizes?
 3. Is there a reliable id → region/chapter name mapping in game data, or do we keep `levelN` names?
-4. How many of the 145 non-stub levels contain zero meshes (pure logic/audio scenes)?
+4. How many levels contain zero meshes (pure logic/audio scenes)?
 
 ## 12. Out of scope for v1
 
