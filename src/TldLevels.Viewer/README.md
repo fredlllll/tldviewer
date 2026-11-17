@@ -76,7 +76,10 @@ The UI and the fly camera share the keyboard, so they take turns:
   stops picking clicks while the cursor is locked, so a right-click over a path
   field cannot open its text menu or steal the keys;
 - clicking anywhere that is not a text field gives the keyboard back to the
-  camera.
+  camera;
+- text fields can only be focused by clicking them: if the panel ever hands
+  focus to the first field on its own (for example on an unrelated key press),
+  the viewer takes it back within a frame, so WASD keeps flying.
 
 ## Scene
 

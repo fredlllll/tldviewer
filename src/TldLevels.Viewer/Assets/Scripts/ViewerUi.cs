@@ -49,6 +49,9 @@ public sealed class ViewerUi : MonoBehaviour
 
     private bool ready;
     private bool pointerLocked;
+    private bool restoringCameraFocus;
+    private int lastPointerDownFrame = -1;
+    private VisualElement lastFocused;
     private string lastStatus;
     private string lastHint;
 
@@ -195,7 +198,29 @@ public sealed class ViewerUi : MonoBehaviour
             }
         }
 
+        EnforceClickOnlyFocus();
         UpdateScale();
+    }
+
+    /// <summary>
+    /// Backstop for <see cref="OnFocusIn"/>: whatever grants a text field focus
+    /// without a click, the keyboard goes back to the camera within one frame.
+    /// </summary>
+    private void EnforceClickOnlyFocus()
+    {
+        VisualElement focused = FocusedElement();
+        if (focused == lastFocused)
+        {
+            return;
+        }
+
+        lastFocused = focused;
+        bool textField = focused is TextField
+            || (focused != null && focused.GetFirstAncestorOfType<TextField>() != null);
+        if (textField && Time.frameCount - lastPointerDownFrame > 1)
+        {
+            ClearFocus();
+        }
     }
 
     private void TryBind()
@@ -252,6 +277,7 @@ public sealed class ViewerUi : MonoBehaviour
         // Clicking anywhere that is not a text field gives the keyboard back to
         // the camera instead of leaving a field silently focused.
         root.RegisterCallback<PointerDownEvent>(OnPointerDown, TrickleDown.TrickleDown);
+        root.RegisterCallback<FocusInEvent>(OnFocusIn);
         root.RegisterCallback<KeyDownEvent>(OnKeyDown, TrickleDown.TrickleDown);
         root.RegisterCallback<KeyUpEvent>(OnKeyUp, TrickleDown.TrickleDown);
 
@@ -263,11 +289,21 @@ public sealed class ViewerUi : MonoBehaviour
 
         ready = true;
         root.pickingMode = pointerLocked ? PickingMode.Ignore : PickingMode.Position;
+
+        // The panel may hand focus to the first focusable element on its own,
+        // which would turn WASD into path text; text fields are click-only.
+        ClearFocus();
         UpdateScale();
     }
 
     private void OnPointerDown(PointerDownEvent evt)
     {
+        if (evt.button == 0)
+        {
+            // Only a click is allowed to focus a text field; see OnFocusIn.
+            lastPointerDownFrame = Time.frameCount;
+        }
+
         // Right mouse is the camera-look button; it must never open a text
         // field's context menu or leave a field focused behind the cursor lock.
         if (evt.button == 1)
@@ -289,6 +325,44 @@ public sealed class ViewerUi : MonoBehaviour
         }
 
         ClearFocus();
+    }
+
+    private void OnFocusIn(FocusInEvent evt)
+    {
+        if (evt.target is not VisualElement)
+        {
+            return;
+        }
+
+        var target = (VisualElement)evt.target;
+        if (target is not TextField && target.GetFirstAncestorOfType<TextField>() == null)
+        {
+            return;
+        }
+
+        if (Time.frameCount - lastPointerDownFrame <= 1)
+        {
+            return;
+        }
+
+        // Unity's runtime panel hands focus to the first focusable element on
+        // its own, which turned WASD into path text mid-flight. Text fields are
+        // click-only: blur right away, and once more on the next tick in case
+        // the panel refuses the blur while it is dispatching the focus event.
+        if (!restoringCameraFocus)
+        {
+            restoringCameraFocus = true;
+            try
+            {
+                FocusedElement()?.Blur();
+            }
+            finally
+            {
+                restoringCameraFocus = false;
+            }
+        }
+
+        root.schedule.Execute(ClearFocus).ExecuteLater(0);
     }
 
     private void OnKeyDown(KeyDownEvent evt)
