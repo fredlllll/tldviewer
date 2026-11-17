@@ -49,6 +49,37 @@ instantiated from the shared asset library, with a LOD chosen per instance. The
 status line reports loaded cells, queued cells, triangles, loaded/known shared
 assets and the number of cached textures.
 
+## UI
+
+The overlay is a UI Toolkit document, not IMGUI:
+
+- `Assets/Scenes/Viewer.unity` hosts a `UIDocument` with
+  `Assets/UI/ViewerPanelSettings.asset` and `Assets/UI/Resources/ViewerUI.uxml`.
+- `Assets/UI/Resources/ViewerUI.uss` holds all layout and colours.
+  `Assets/UI/Resources/ViewerTheme.tss` imports Unity's default runtime theme.
+- `Assets/Scripts/ViewerUi.cs` binds the named elements, raises plain C# events
+  and rebuilds the two-column level grid.
+
+The panel fills 94% of the viewport up to 620 px wide and 92% of its height, so
+it stays inside a small docked Game view instead of running off the edge. The
+level `ScrollView` grows and shrinks with the remaining space. The panel
+settings use `ConstantPixelSize`, and `ViewerUi` sets the panel scale from the
+viewport size, clamped to 0.8–1.5 so text never becomes unreadable. **Hide**
+collapses the panel to its title bar, and **Settings** hides the three path
+fields when vertical space is tight.
+
+The UI smoke test opens the viewer scene and checks the `UIDocument` references,
+the theme, the panel scale mode and every element name that `ViewerUi` binds:
+
+```powershell
+Unity.exe -batchmode -nographics `
+  -projectPath src/TldLevels.Viewer `
+  -executeMethod ViewerUiSmokeTest.Run `
+  -logFile ui-smoke.log
+```
+
+It also appears as **Tools > TLD Levels > Smoke Test Viewer UI**.
+
 ## Package format
 
 A package is generated once per level by the exporter. Level-independent

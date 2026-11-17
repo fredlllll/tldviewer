@@ -1,0 +1,45 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+    <Style src="ViewerUI.uss" />
+    <ui:VisualElement name="viewer-ui" class="viewer-ui">
+        <ui:VisualElement name="panel" class="panel">
+            <ui:VisualElement class="panel-header">
+                <ui:Label text="TLD Level Viewer" class="panel-title" />
+                <ui:Button name="settings-toggle" text="Settings" class="header-button" />
+                <ui:Button name="panel-toggle" text="Hide" class="header-button" />
+            </ui:VisualElement>
+            <ui:VisualElement name="panel-body" class="panel-body">
+                <ui:VisualElement name="settings" class="settings">
+                    <ui:Label text="Export folder" class="field-label" />
+                    <ui:TextField name="export-folder" class="path-field" />
+                    <ui:Label text="Game data folder" class="field-label" />
+                    <ui:TextField name="game-folder" class="path-field" />
+                    <ui:Label text="Exporter (exe, dll or .csproj)" class="field-label" />
+                    <ui:TextField name="exporter-path" class="path-field" />
+                    <ui:Label name="exporter-warning" text="Exporter not found. Build src\TldLevels.Exporter or set its path above." class="exporter-warning" />
+                </ui:VisualElement>
+                <ui:VisualElement class="toolbar">
+                    <ui:Button name="rescan" text="Rescan" class="tool-button" />
+                    <ui:Button name="clear-filter" text="Clear filter" class="tool-button" />
+                    <ui:TextField name="filter" class="filter-field" />
+                </ui:VisualElement>
+                <ui:ScrollView name="level-list" class="level-list" horizontal-scroller-visibility="Hidden" />
+                <ui:Label name="level-empty" class="empty-label" />
+                <ui:VisualElement class="actions">
+                    <ui:Label text="Package path (.viewer)" class="field-label" />
+                    <ui:TextField name="package-path" class="path-field" />
+                    <ui:VisualElement class="action-row">
+                        <ui:Button name="load-path" text="Load path" class="tool-button" />
+                        <ui:Button name="frame-level" text="Frame level (F)" class="tool-button" />
+                    </ui:VisualElement>
+                </ui:VisualElement>
+                <ui:VisualElement name="radius-row" class="radius-row">
+                    <ui:Label name="radius-label" text="Load radius" class="field-label" />
+                    <ui:Slider name="radius" low-value="256" high-value="4000" />
+                </ui:VisualElement>
+                <ui:Label name="streamer-status" class="streamer-status" />
+                <ui:Label name="status" class="status" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+        <ui:Label name="hint" class="hint" />
+    </ui:VisualElement>
+</ui:UXML>

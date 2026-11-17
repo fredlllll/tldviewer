@@ -13,7 +13,7 @@ namespace TldLevels.Viewer
 /// <summary>
 /// Lists every level file in the game data folder, marks which ones already
 /// have a <c>.viewer</c> package, and converts missing packages with the
-/// exporter before streaming them.
+/// exporter before streaming them. The UI itself lives in <see cref="ViewerUi"/>.
 /// </summary>
 public sealed class LevelLoader : MonoBehaviour
 {
@@ -23,124 +23,87 @@ public sealed class LevelLoader : MonoBehaviour
     private const string DefaultExportFolder = @"\\VBoxSvr\TLDLevels\tldlevels\levels";
     private const string DefaultGameFolder = @"\\VBoxSvr\TheLongDark\tld_dlc\wintermute\tld_Data";
 
-    private static readonly Color ExportedColor = new Color(0.62f, 0.90f, 0.62f);
-    private static readonly Color ConvertColor = new Color(1.00f, 0.82f, 0.52f);
-
+    private ViewerUi ui;
     private string exportFolder = DefaultExportFolder;
     private string gameFolder = DefaultGameFolder;
     private string exporterPath = string.Empty;
-    private string pathInput = string.Empty;
-    private string filter = string.Empty;
     private string status = "Scanning game files...";
-    private List<Level> levels = new List<Level>();
-    private Vector2 levelListScroll;
+    private List<ViewerLevel> levels = new List<ViewerLevel>();
     private PackageStreamer packageStreamer;
     private bool isLoading;
+    private bool uiPopulated;
 
     private void Start()
     {
+        ui = GetComponent<ViewerUi>();
+        if (ui == null)
+        {
+            ui = gameObject.AddComponent<ViewerUi>();
+        }
+
+        ui.Initialize();
+        ui.RescanRequested += RefreshLevels;
+        ui.ClearFilterRequested += ClearFilter;
+        ui.FilterChanged += _ => RebuildLevelList();
+        ui.LevelSelected += LoadLevelById;
+        ui.LoadPathRequested += () => Load(ui.PackagePath);
+        ui.FrameRequested += FrameLoadedLevel;
+        ui.RadiusChanged += SetRadius;
+
         exportFolder = PlayerPrefs.GetString(ExportFolderKey, DefaultExportFolder);
         gameFolder = PlayerPrefs.GetString(GameFolderKey, DefaultGameFolder);
         exporterPath = PlayerPrefs.GetString(ExporterPathKey, DefaultExporterPath());
+
+        ui.ExportFolder = exportFolder;
+        ui.GameFolder = gameFolder;
+        ui.ExporterPath = exporterPath;
+
         RefreshLevels();
-    }
-
-    private void OnGUI()
-    {
-        GUILayout.BeginArea(new Rect(16, 16, 760, 660), GUI.skin.box);
-        GUILayout.Label("TLD Level Viewer", GUI.skin.label);
-
-        GUILayout.Label("Export folder");
-        exportFolder = GUILayout.TextField(exportFolder);
-        GUILayout.Label("Game data folder");
-        gameFolder = GUILayout.TextField(gameFolder);
-        GUILayout.Label("Exporter (exe, dll or .csproj)");
-        exporterPath = GUILayout.TextField(exporterPath);
-
-        GUILayout.BeginHorizontal();
-        if (GUILayout.Button("Rescan", GUILayout.Width(100))) RefreshLevels();
-        if (GUILayout.Button("Clear filter", GUILayout.Width(100))) filter = string.Empty;
-        GUILayout.Label("Filter");
-        filter = GUILayout.TextField(filter);
-        GUILayout.EndHorizontal();
-
-        bool exporterReady = !string.IsNullOrWhiteSpace(exporterPath) && File.Exists(exporterPath);
-        if (!exporterReady)
-        {
-            GUILayout.Label("Exporter not found. Build src\\TldLevels.Exporter or set its path above.");
-        }
-
-        List<Level> visible = levels
-            .Where(level => filter.Length == 0
-                || level.SceneName.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0)
-            .ToList();
-
-        if (visible.Count == 0)
-        {
-            GUILayout.Label(levels.Count == 0
-                ? "No level files found in the game data folder."
-                : "No levels match the filter.");
-        }
-        else
-        {
-            levelListScroll = GUILayout.BeginScrollView(levelListScroll, GUILayout.Height(330));
-            const int columns = 2;
-            GUI.enabled = !isLoading;
-            for (int i = 0; i < visible.Count; i += columns)
-            {
-                GUILayout.BeginHorizontal();
-                for (int column = 0; column < columns && i + column < visible.Count; column++)
-                {
-                    Level level = visible[i + column];
-                    Color previous = GUI.backgroundColor;
-                    GUI.backgroundColor = level.Exported ? ExportedColor : ConvertColor;
-                    if (GUILayout.Button(level.ButtonLabel, GUILayout.Height(26)))
-                        LoadLevel(level);
-                    GUI.backgroundColor = previous;
-                }
-
-                GUILayout.EndHorizontal();
-            }
-
-            GUI.enabled = true;
-            GUILayout.EndScrollView();
-        }
-
-        GUILayout.Label("Package path (.viewer)");
-        pathInput = GUILayout.TextField(pathInput);
-        GUILayout.BeginHorizontal();
-        GUI.enabled = !isLoading && Directory.Exists(pathInput);
-        if (GUILayout.Button("Load path")) Load(pathInput);
-        GUI.enabled = IsSomethingLoaded() && !isLoading;
-        if (GUILayout.Button("Frame level (F)", GUILayout.Width(140))) FrameLoadedLevel();
-        GUI.enabled = true;
-        GUILayout.EndHorizontal();
-
-        if (packageStreamer != null && packageStreamer.IsRunning)
-        {
-            GUILayout.Label($"Load radius {packageStreamer.LoadRadius:F0} m (unload {packageStreamer.UnloadRadius:F0} m)");
-            float radius = GUILayout.HorizontalSlider(packageStreamer.LoadRadius, 256f, 4000f);
-            if (Mathf.Abs(radius - packageStreamer.LoadRadius) > 0.5f)
-            {
-                packageStreamer.LoadRadius = radius;
-                packageStreamer.UnloadRadius = radius * 1.4f;
-            }
-
-            GUILayout.Label(packageStreamer.StatusLine);
-        }
-
-        GUILayout.Label(status);
-        GUILayout.EndArea();
-
-        var flyCamera = Camera.main != null ? Camera.main.GetComponent<FlyCamera>() : null;
-        if (flyCamera != null)
-            GUI.Label(new Rect(16, Screen.height - 30, 650, 24), $"WASD move · Q/E vertical · RMB look · wheel speed ({flyCamera.MoveSpeed:F0} m/s) · Shift boost");
     }
 
     private void Update()
     {
-        if (Input.GetKeyDown(KeyCode.F) && IsSomethingLoaded())
+        if (!uiPopulated)
+        {
+            // The UI tree can be one frame behind scene load; push the level
+            // list as soon as the document has bound its elements.
+            if (!ui.IsReady)
+            {
+                return;
+            }
+
+            uiPopulated = true;
+            ui.ExportFolder = exportFolder;
+            ui.GameFolder = gameFolder;
+            ui.ExporterPath = exporterPath;
+            RebuildLevelList();
+            UpdateExporterWarning();
+        }
+
+        if (Input.GetKeyDown(KeyCode.F) && IsSomethingLoaded() && !ui.IsTextInputFocused)
+        {
             FrameLoadedLevel();
+        }
+
+        if (packageStreamer != null && packageStreamer.IsRunning)
+        {
+            ui.SetStreamer(true, packageStreamer.StatusLine, packageStreamer.LoadRadius, packageStreamer.UnloadRadius);
+        }
+        else
+        {
+            ui.SetStreamer(false, string.Empty, 0f, 0f);
+        }
+
+        ui.SetFrameEnabled(IsSomethingLoaded() && !isLoading);
+
+        var flyCamera = Camera.main != null ? Camera.main.GetComponent<FlyCamera>() : null;
+        if (flyCamera != null)
+        {
+            ui.SetHint(
+                $"WASD move · Q/E vertical · RMB look · wheel speed ({flyCamera.MoveSpeed:F0} m/s) · Shift boost");
+        }
+
+        ui.SetStatus(status);
     }
 
     private bool IsSomethingLoaded() =>
@@ -148,14 +111,25 @@ public sealed class LevelLoader : MonoBehaviour
 
     private void RefreshLevels()
     {
+        if (ui == null)
+        {
+            return;
+        }
+
+        exportFolder = ui.IsReady ? ui.ExportFolder : exportFolder;
+        gameFolder = ui.IsReady ? ui.GameFolder : gameFolder;
+        exporterPath = ui.IsReady ? ui.ExporterPath : exporterPath;
+
         PlayerPrefs.SetString(ExportFolderKey, exportFolder);
         PlayerPrefs.SetString(GameFolderKey, gameFolder);
         PlayerPrefs.SetString(ExporterPathKey, exporterPath);
 
-        levels = new List<Level>();
+        levels = new List<ViewerLevel>();
         if (!Directory.Exists(gameFolder))
         {
             status = $"Game data folder not found: {gameFolder}";
+            UpdateExporterWarning();
+            RebuildLevelList();
             return;
         }
 
@@ -172,33 +146,86 @@ public sealed class LevelLoader : MonoBehaviour
                 if (!int.TryParse(idText, out int id))
                     continue;
 
-                long size = new FileInfo(file).Length;
-                levels.Add(new Level
+                levels.Add(new ViewerLevel
                 {
                     Id = id,
                     SceneName = name,
                     SourcePath = file,
-                    SizeBytes = size,
+                    SizeBytes = new FileInfo(file).Length,
                 });
             }
         }
         catch (Exception exception)
         {
-            levels = new List<Level>();
+            levels = new List<ViewerLevel>();
             status = $"Could not scan {gameFolder}: {exception.Message}";
+            UpdateExporterWarning();
+            RebuildLevelList();
             return;
         }
+
         levels.Sort((a, b) => a.Id.CompareTo(b.Id));
-        foreach (Level level in levels)
+        foreach (ViewerLevel level in levels)
         {
             level.Exported = File.Exists(Path.Combine(exportFolder, level.SceneName + ".viewer", "manifest.json"));
-            level.UpdateLabel();
         }
 
         int exported = levels.Count(level => level.Exported);
         status = levels.Count == 0
             ? $"No level files found in {gameFolder}"
             : $"Found {levels.Count} levels: {exported} exported, {levels.Count - exported} to convert.";
+
+        UpdateExporterWarning();
+        RebuildLevelList();
+    }
+
+    private void UpdateExporterWarning()
+    {
+        ui.SetExporterWarning(string.IsNullOrWhiteSpace(exporterPath) || !File.Exists(exporterPath));
+    }
+
+    private void RebuildLevelList()
+    {
+        if (ui == null)
+        {
+            return;
+        }
+
+        string filter = ui.Filter;
+        List<ViewerLevel> visible = levels.Where(level => level.Matches(filter)).ToList();
+        ui.SetLevels(visible, !isLoading);
+
+        if (levels.Count == 0)
+        {
+            ui.SetLevelEmpty("No level files found in the game data folder.");
+        }
+        else if (visible.Count == 0)
+        {
+            ui.SetLevelEmpty("No levels match the filter.");
+        }
+        else
+        {
+            ui.SetLevelEmpty(null);
+        }
+
+        ui.SetStatus(status);
+    }
+
+    private void ClearFilter()
+    {
+        ui.Filter = string.Empty;
+        RebuildLevelList();
+    }
+
+    private void SetRadius(float radius)
+    {
+        if (packageStreamer == null)
+        {
+            return;
+        }
+
+        packageStreamer.LoadRadius = radius;
+        packageStreamer.UnloadRadius = radius * 1.4f;
     }
 
     private void FrameLoadedLevel()
@@ -242,21 +269,39 @@ public sealed class LevelLoader : MonoBehaviour
         if (isLoading)
             return;
 
-        if (Directory.Exists(path))
+        if (!Directory.Exists(path))
         {
-            LoadPackage(path);
+            status = $"Package not found: {path}";
+            ui.SetStatus(status);
             return;
         }
 
-        status = $"Package not found: {path}";
+        SetBusy(true);
+        try
+        {
+            LoadPackage(path);
+        }
+        finally
+        {
+            SetBusy(false);
+        }
     }
 
-    private async void LoadLevel(Level level)
+    private void LoadLevelById(int id)
+    {
+        ViewerLevel level = levels.FirstOrDefault(candidate => candidate.Id == id);
+        if (level != null)
+        {
+            LoadLevel(level);
+        }
+    }
+
+    private async void LoadLevel(ViewerLevel level)
     {
         if (isLoading || level == null)
             return;
 
-        isLoading = true;
+        SetBusy(true);
         try
         {
             if (!level.Exported)
@@ -265,21 +310,31 @@ public sealed class LevelLoader : MonoBehaviour
                     return;
 
                 level.Exported = true;
-                level.UpdateLabel();
                 status = $"Converted {level.SceneName}.";
+                RebuildLevelList();
             }
 
             string packagePath = Path.Combine(exportFolder, level.SceneName + ".viewer");
-            pathInput = packagePath;
+            ui.PackagePath = packagePath;
             LoadPackage(packagePath);
         }
         finally
         {
-            isLoading = false;
+            SetBusy(false);
         }
     }
 
-    private async Task<bool> ConvertLevelAsync(Level level)
+    private void SetBusy(bool busy)
+    {
+        isLoading = busy;
+        ui.SetBusy(busy);
+        if (!busy)
+        {
+            RebuildLevelList();
+        }
+    }
+
+    private async Task<bool> ConvertLevelAsync(ViewerLevel level)
     {
         if (string.IsNullOrWhiteSpace(exporterPath) || !File.Exists(exporterPath))
         {
@@ -319,7 +374,7 @@ public sealed class LevelLoader : MonoBehaviour
         }
     }
 
-    private ProcessStartInfo CreateExporterStartInfo(Level level)
+    private ProcessStartInfo CreateExporterStartInfo(ViewerLevel level)
     {
         ProcessStartInfo startInfo = new ProcessStartInfo
         {
@@ -366,7 +421,6 @@ public sealed class LevelLoader : MonoBehaviour
             return;
         }
 
-        isLoading = true;
         status = $"Opening {Path.GetFileName(path)}...";
         try
         {
@@ -385,10 +439,6 @@ public sealed class LevelLoader : MonoBehaviour
         {
             status = $"Package load failed: {exception.Message}";
             Debug.LogException(exception);
-        }
-        finally
-        {
-            isLoading = false;
         }
     }
 
@@ -444,23 +494,6 @@ public sealed class LevelLoader : MonoBehaviour
         }
 
         return null;
-    }
-
-    private sealed class Level
-    {
-        public int Id;
-        public string SceneName;
-        public string SourcePath;
-        public long SizeBytes;
-        public bool Exported;
-        public string ButtonLabel { get; private set; }
-
-        public double Megabytes => SizeBytes / (1024.0 * 1024.0);
-
-        public void UpdateLabel()
-        {
-            ButtonLabel = $"{SceneName}   {(Exported ? "exported" : "convert")}   {Megabytes:F1} MB";
-        }
     }
 }
 }

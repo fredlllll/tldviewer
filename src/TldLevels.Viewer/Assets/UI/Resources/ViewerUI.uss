@@ -1,0 +1,273 @@
+.viewer-ui {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    font-size: 12px;
+    color: #dfe7ee;
+}
+
+.panel {
+    position: absolute;
+    left: 12px;
+    top: 12px;
+    width: 94%;
+    max-width: 620px;
+    height: 92%;
+    padding: 8px;
+    background-color: #0c1117eb;
+    border-width: 1px;
+    border-color: #ffffff1a;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.panel.collapsed {
+    height: auto;
+}
+
+.panel.collapsed .panel-body {
+    display: none;
+}
+
+.panel-header {
+    flex-direction: row;
+    align-items: center;
+    flex-shrink: 0;
+    margin-bottom: 4px;
+}
+
+.panel-title {
+    flex-grow: 1;
+    font-size: 13px;
+    -unity-font-style: bold;
+    color: #e8f0f7;
+}
+
+.header-button {
+    height: 20px;
+    margin-left: 4px;
+    padding: 0 8px;
+    font-size: 10px;
+    border-radius: 3px;
+    border-width: 1px;
+    border-color: #3c4a5a;
+    background-color: #202a34;
+    color: #dfe7ee;
+}
+
+.header-button:hover {
+    border-color: #5a6b7d;
+}
+
+.panel-body {
+    flex-grow: 1;
+    min-height: 0;
+}
+
+.settings {
+    flex-shrink: 0;
+}
+
+.settings.hidden {
+    display: none;
+}
+
+.field-label {
+    margin: 2px 0 1px 0;
+    font-size: 10px;
+    color: #8fa2b3;
+}
+
+.path-field {
+    margin-bottom: 4px;
+    font-size: 11px;
+}
+
+.unity-text-field__input {
+    padding: 3px 6px;
+    background-color: #1a222b;
+    border-width: 1px;
+    border-color: #34404d;
+    border-radius: 3px;
+    color: #e6edf3;
+}
+
+.unity-text-field__input:hover {
+    border-color: #4a5b6c;
+}
+
+.unity-text-field__input:focus {
+    border-color: #5f8fb5;
+}
+
+.exporter-warning {
+    margin: 2px 0;
+    font-size: 11px;
+    color: #ffb4a8;
+    white-space: normal;
+}
+
+.exporter-warning.hidden {
+    display: none;
+}
+
+.toolbar {
+    flex-direction: row;
+    align-items: center;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.tool-button {
+    height: 22px;
+    margin-right: 4px;
+    padding: 0 8px;
+    font-size: 11px;
+    border-radius: 3px;
+    border-width: 1px;
+    border-color: #3c4a5a;
+    background-color: #24303c;
+    color: #dfe7ee;
+}
+
+.tool-button:hover {
+    border-color: #5a6b7d;
+}
+
+.tool-button:disabled {
+    opacity: 0.45;
+}
+
+.filter-field {
+    flex-grow: 1;
+    margin: 0;
+}
+
+.level-list {
+    flex-grow: 1;
+    min-height: 48px;
+    margin: 4px 0;
+    background-color: #ffffff05;
+    border-radius: 3px;
+}
+
+.level-list .unity-scroll-view__content-container {
+    flex-direction: column;
+}
+
+.level-row {
+    flex-direction: row;
+    flex-shrink: 0;
+}
+
+.level-button {
+    flex-grow: 1;
+    flex-basis: 0;
+    height: 22px;
+    margin: 2px;
+    padding: 0 6px;
+    font-size: 11px;
+    border-radius: 3px;
+    border-width: 1px;
+    unity-text-align: middle-left;
+}
+
+.level-button .unity-text-element {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.level-button:hover {
+    border-color: #c8d4df;
+}
+
+.level-button:disabled {
+    opacity: 0.45;
+}
+
+.level-exported {
+    background-color: #22402c;
+    border-color: #3d6b4a;
+    color: #b9e6c4;
+}
+
+.level-convert {
+    background-color: #463a1e;
+    border-color: #6f5c31;
+    color: #ffe1a6;
+}
+
+.empty-label {
+    flex-shrink: 0;
+    margin: 4px 2px;
+    font-size: 11px;
+    color: #9fb0c0;
+    white-space: normal;
+}
+
+.empty-label.hidden {
+    display: none;
+}
+
+.actions {
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.action-row {
+    flex-direction: row;
+}
+
+.action-row .tool-button {
+    flex-grow: 1;
+}
+
+.radius-row {
+    flex-direction: row;
+    align-items: center;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.radius-row .field-label {
+    flex-grow: 1;
+    margin: 0;
+}
+
+.radius-row .unity-slider {
+    flex-grow: 2;
+    margin-left: 6px;
+}
+
+.streamer-status {
+    flex-shrink: 0;
+    margin-top: 2px;
+    font-size: 11px;
+    color: #86b7d8;
+    white-space: normal;
+}
+
+.streamer-status.hidden {
+    display: none;
+}
+
+.status {
+    flex-shrink: 0;
+    margin-top: 2px;
+    font-size: 11px;
+    color: #9fb0c0;
+    white-space: normal;
+}
+
+.hint {
+    position: absolute;
+    left: 14px;
+    right: 14px;
+    bottom: 8px;
+    font-size: 11px;
+    color: #dce6f0a8;
+    white-space: normal;
+}

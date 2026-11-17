@@ -376,6 +376,11 @@ instances the shared meshes and selects a LOD per instance at distance.
 - **No generated content.** The viewer instantiates only the meshes, materials
   and LOD variants listed in the package manifest; it never probes for files or
   builds fallback geometry.
+- **UI Toolkit overlay.** The level list, path fields, streaming radius and
+  status lines are a `UIDocument` built from `Assets/UI/Resources/ViewerUI.uxml`
+  and `ViewerUI.uss`. The panel uses percentage sizing inside the viewport with
+  a `ConstantPixelSize` scale clamped to 0.8–1.5, so it fits small Game views
+  without shrinking text into illegibility.
 
 ## 9. Milestones
 
