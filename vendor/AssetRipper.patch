@@ -1,0 +1,334 @@
+diff --git a/Source/AssetRipper.Export.Modules.Models/GlbLevelBuilder.cs b/Source/AssetRipper.Export.Modules.Models/GlbLevelBuilder.cs
+index 4ed18a3ca..9d194075e 100644
+--- a/Source/AssetRipper.Export.Modules.Models/GlbLevelBuilder.cs
++++ b/Source/AssetRipper.Export.Modules.Models/GlbLevelBuilder.cs
+@@ -22,11 +22,31 @@ using SharpGLTF.Materials;
+ using SharpGLTF.Memory;
+ using SharpGLTF.Scenes;
+ using System.Buffers;
++using System.Numerics;
+ 
+ namespace AssetRipper.Export.Modules.Models;
+ 
++/// <summary>
++/// One renderable mesh with the world transform that has to be applied by the
++/// consumer. Unlike the whole-scene exporter this keeps the scene hierarchy out
++/// of the result, which is what the streamed viewer package needs: every cell
++/// can place its meshes directly with a single transform.
++/// </summary>
++public readonly record struct GlbDrawMesh(
++	string Name,
++	IMeshBuilder<MaterialBuilder> Mesh,
++	Matrix4x4 WorldMatrix,
++	int Lod);
++
+ public static class GlbLevelBuilder
+ {
++	/// <summary>
++	/// When false, omit lower-detail Unity LOD children. The original exporter
++	/// emitted every LOD simultaneously because glTF has no runtime LODGroup
++	/// equivalent in this scene export path.
++	/// </summary>
++	public static bool IncludeAllLods { get; set; }
++
+ 	public static SceneBuilder Build(IEnumerable<IUnityObjectBase> assets, bool isScene)
+ 	{
+ 		SceneBuilder sceneBuilder = new();
+@@ -52,6 +72,175 @@ public static class GlbLevelBuilder
+ 		return sceneBuilder;
+ 	}
+ 
++	/// <summary>
++	/// Yields every visual mesh in the scene as an independent draw item with a
++	/// world-space transform. Materials are cached for the whole enumeration so
++	/// all draw items share the same <see cref="MaterialBuilder"/> instances.
++	/// </summary>
++	public static IEnumerable<GlbDrawMesh> BuildDrawMeshes(IEnumerable<IUnityObjectBase> assets, bool includeAllLods)
++	{
++		BuildParameters parameters = new(isScene: true);
++		HashSet<IUnityObjectBase> exportedAssets = new();
++
++		foreach (IUnityObjectBase asset in assets)
++		{
++			if (exportedAssets.Contains(asset) || asset is not (IGameObject or IComponent))
++			{
++				continue;
++			}
++
++			IGameObject root = GetRoot(asset);
++			foreach (GlbDrawMesh drawMesh in CollectDrawMeshes(
++				parameters,
++				root.GetTransform(),
++				Transformation.Identity,
++				Transformation.Identity,
++				Matrix4x4.Identity,
++				includeAllLods))
++			{
++				yield return drawMesh;
++			}
++
++			foreach (IEditorExtension exportedAsset in root.FetchHierarchy())
++			{
++				exportedAssets.Add(exportedAsset);
++			}
++		}
++	}
++
++	private static IEnumerable<GlbDrawMesh> CollectDrawMeshes(
++		BuildParameters parameters,
++		ITransform transform,
++		Transformation parentGlobalTransform,
++		Transformation parentGlobalInverseTransform,
++		Matrix4x4 parentGltfWorldMatrix,
++		bool includeAllLods)
++	{
++		IGameObject? gameObject = transform.GameObject_C4P;
++		if (gameObject is null || ShouldSkipForVisualization(gameObject.Name, includeAllLods))
++		{
++			yield break;
++		}
++
++		int lod = GetLodLevel(gameObject.Name);
++		if (!includeAllLods && lod > 0)
++		{
++			yield break;
++		}
++
++		Transformation localTransform = transform.ToTransformation();
++		Transformation localInverseTransform = transform.ToInverseTransformation();
++		Transformation globalTransform = localTransform * parentGlobalTransform;
++		Transformation globalInverseTransform = parentGlobalInverseTransform * localInverseTransform;
++
++		Matrix4x4 localGltfMatrix = Matrix4x4.CreateScale(transform.LocalScale_C4.X, transform.LocalScale_C4.Y, transform.LocalScale_C4.Z)
++			* Matrix4x4.CreateFromQuaternion(GlbCoordinateConversion.ToGltfQuaternionConvert(transform.LocalRotation_C4))
++			* Matrix4x4.CreateTranslation(GlbCoordinateConversion.ToGltfVector3Convert(transform.LocalPosition_C4));
++		Matrix4x4 gltfWorldMatrix = localGltfMatrix * parentGltfWorldMatrix;
++
++		if (gameObject.TryGetComponent(out IMeshFilter? meshFilter)
++			&& meshFilter.TryGetMesh(out IMesh? mesh)
++			&& mesh.IsSet()
++			&& parameters.TryGetOrMakeMeshData(mesh, out MeshData meshData)
++			&& gameObject.TryGetComponent(out IRenderer? renderer))
++		{
++			bool dynamic = ReferencesDynamicMesh(renderer);
++			IMeshBuilder<MaterialBuilder>? meshBuilder = BuildMeshBuilder(
++				parameters,
++				mesh,
++				meshData,
++				renderer,
++				dynamic,
++				globalTransform,
++				globalInverseTransform);
++			if (meshBuilder is not null)
++			{
++				yield return new GlbDrawMesh(gameObject.Name, meshBuilder, gltfWorldMatrix, lod);
++			}
++		}
++
++		foreach (ITransform childTransform in transform.Children_C4P.WhereNotNull())
++		{
++			foreach (GlbDrawMesh child in CollectDrawMeshes(
++				parameters,
++				childTransform,
++				localTransform * parentGlobalTransform,
++				parentGlobalInverseTransform * localInverseTransform,
++				gltfWorldMatrix,
++				includeAllLods))
++			{
++				yield return child;
++			}
++		}
++	}
++
++	private static int GetLodLevel(string name)
++	{
++		int marker = name.LastIndexOf("_LOD", StringComparison.OrdinalIgnoreCase);
++		if (marker >= 0 && marker + 4 < name.Length && name[marker + 4] is >= '0' and <= '9')
++		{
++			return name[marker + 4] - '0';
++		}
++
++		return 0;
++	}
++
++	private static IMeshBuilder<MaterialBuilder>? BuildMeshBuilder(
++		BuildParameters parameters,
++		IMesh mesh,
++		MeshData meshData,
++		IRenderer renderer,
++		bool dynamic,
++		Transformation globalTransform,
++		Transformation globalInverseTransform)
++	{
++		AccessListBase<ISubMesh> subMeshes = mesh.SubMeshes;
++		MaterialList materialList = new(renderer);
++		if (dynamic)
++		{
++			(ISubMesh, MaterialBuilder)[] subMeshArray = ArrayPool<(ISubMesh, MaterialBuilder)>.Shared.Rent(subMeshes.Count);
++			try
++			{
++				for (int i = 0; i < subMeshes.Count; i++)
++				{
++					subMeshArray[i] = (subMeshes[i], parameters.GetOrMakeMaterial(materialList[i]));
++				}
++
++				return GlbSubMeshBuilder.BuildSubMeshes(
++					new ArraySegment<(ISubMesh, MaterialBuilder)>(subMeshArray, 0, subMeshes.Count),
++					mesh.Is16BitIndices(),
++					meshData,
++					Transformation.Identity,
++					Transformation.Identity);
++			}
++			finally
++			{
++				ArrayPool<(ISubMesh, MaterialBuilder)>.Shared.Return(subMeshArray);
++			}
++		}
++
++		int[] subsetIndices = GetSubsetIndices(renderer);
++		(ISubMesh, MaterialBuilder)[] array = ArrayPool<(ISubMesh, MaterialBuilder)>.Shared.Rent(subsetIndices.Length);
++		try
++		{
++			for (int i = 0; i < subsetIndices.Length; i++)
++			{
++				array[i] = (subMeshes[subsetIndices[i]], parameters.GetOrMakeMaterial(materialList[i]));
++			}
++
++			return GlbSubMeshBuilder.BuildSubMeshes(
++				new ArraySegment<(ISubMesh, MaterialBuilder)>(array, 0, subsetIndices.Length),
++				mesh.Is16BitIndices(),
++				meshData,
++				globalInverseTransform,
++				globalTransform);
++		}
++		finally
++		{
++			ArrayPool<(ISubMesh, MaterialBuilder)>.Shared.Return(array);
++		}
++	}
++
+ 	private static void AddGameObjectToScene(SceneBuilder sceneBuilder, BuildParameters parameters, NodeBuilder? parentNode, Transformation parentGlobalTransform, Transformation parentGlobalInverseTransform, ITransform transform)
+ 	{
+ 		IGameObject? gameObject = transform.GameObject_C4P;
+@@ -60,6 +249,11 @@ public static class GlbLevelBuilder
+ 			return;
+ 		}
+ 
++		if (ShouldSkipForVisualization(gameObject.Name, IncludeAllLods))
++		{
++			return;
++		}
++
+ 		Transformation localTransform = transform.ToTransformation();
+ 		Transformation localInverseTransform = transform.ToInverseTransformation();
+ 		Transformation globalTransform = localTransform * parentGlobalTransform;
+@@ -101,6 +295,33 @@ public static class GlbLevelBuilder
+ 		}
+ 	}
+ 
++	private static bool ShouldSkipForVisualization(string name, bool includeAllLods)
++	{
++		if (name.Contains("shadow", StringComparison.OrdinalIgnoreCase)
++			|| name.Contains("shadow_caster", StringComparison.OrdinalIgnoreCase)
++			|| name.Contains("impostor", StringComparison.OrdinalIgnoreCase)
++			|| name.Contains("collision", StringComparison.OrdinalIgnoreCase)
++			|| name.Contains("collider", StringComparison.OrdinalIgnoreCase)
++			|| name.Contains("navmesh", StringComparison.OrdinalIgnoreCase))
++		{
++			return true;
++		}
++
++		if (includeAllLods)
++		{
++			return false;
++		}
++
++		int marker = name.IndexOf("_LOD", StringComparison.OrdinalIgnoreCase);
++		if (marker < 0)
++		{
++			return false;
++		}
++
++		int digit = marker + 4;
++		return digit < name.Length && name[digit] >= '1' && name[digit] <= '9';
++	}
++
+ 	private static void AddDynamicMeshToScene(SceneBuilder sceneBuilder, BuildParameters parameters, NodeBuilder node, IMesh mesh, MeshData meshData, MaterialList materialList)
+ 	{
+ 		AccessListBase<ISubMesh> subMeshes = mesh.SubMeshes;
+diff --git a/Source/AssetRipper.Export.Modules.Models/GlbSubMeshBuilder.cs b/Source/AssetRipper.Export.Modules.Models/GlbSubMeshBuilder.cs
+index 0db07fe68..12ef0951c 100644
+--- a/Source/AssetRipper.Export.Modules.Models/GlbSubMeshBuilder.cs
++++ b/Source/AssetRipper.Export.Modules.Models/GlbSubMeshBuilder.cs
+@@ -11,11 +11,15 @@ using System.Runtime.CompilerServices;
+ 
+ namespace AssetRipper.Export.Modules.Models;
+ 
+-internal static class GlbSubMeshBuilder
++public static class GlbSubMeshBuilder
+ {
+ 	public static IMeshBuilder<MaterialBuilder> BuildSubMeshes(ArraySegment<ValueTuple<ISubMesh, MaterialBuilder>> subMeshes, bool is16BitIndices, MeshData meshData, Transformation transform, Transformation inverseTransform)
+ 	{
+ 		BuildSubMeshParameters parameters = new BuildSubMeshParameters(subMeshes, is16BitIndices, meshData, transform, inverseTransform);
++		if (subMeshes.Count > 0 && subMeshes.All(static pair => IsRockCliff09(pair.Item2)))
++		{
++			return BuildRockCliff09SubMeshes(parameters);
++		}
+ 		switch (meshData.GetMeshType())
+ 		{
+ 			case GlbMeshType.Position | GlbMeshType.Empty | GlbMeshType.Empty:
+@@ -127,6 +131,41 @@ internal static class GlbSubMeshBuilder
+ 		}
+ 	}
+ 
++	private static bool IsRockCliff09(MaterialBuilder material) =>
++		material.Name.Contains("TRN_RockCliff_09", StringComparison.OrdinalIgnoreCase)
++		&& !material.Name.Contains("Snow", StringComparison.OrdinalIgnoreCase);
++
++	private static IMeshBuilder<MaterialBuilder> BuildRockCliff09SubMeshes(BuildSubMeshParameters parameters)
++	{
++		return parameters.MeshData.GetMeshType() switch
++		{
++			GlbMeshType.Position | GlbMeshType.Color1Texture1 | GlbMeshType.Empty => BuildSubMeshes<VertexPosition, VertexTexture1, VertexEmpty>(parameters),
++			GlbMeshType.PositionNormal | GlbMeshType.Color1Texture1 | GlbMeshType.Empty => BuildSubMeshes<VertexPositionNormal, VertexTexture1, VertexEmpty>(parameters),
++			GlbMeshType.PositionNormalTangent | GlbMeshType.Color1Texture1 | GlbMeshType.Empty => BuildSubMeshes<VertexPositionNormalTangent, VertexTexture1, VertexEmpty>(parameters),
++			GlbMeshType.Position | GlbMeshType.Color1Texture2 | GlbMeshType.Empty => BuildSubMeshes<VertexPosition, VertexTexture2, VertexEmpty>(parameters),
++			GlbMeshType.PositionNormal | GlbMeshType.Color1Texture2 | GlbMeshType.Empty => BuildSubMeshes<VertexPositionNormal, VertexTexture2, VertexEmpty>(parameters),
++			GlbMeshType.PositionNormalTangent | GlbMeshType.Color1Texture2 | GlbMeshType.Empty => BuildSubMeshes<VertexPositionNormalTangent, VertexTexture2, VertexEmpty>(parameters),
++			GlbMeshType.Position | GlbMeshType.Color1TextureN | GlbMeshType.Empty => BuildSubMeshes<VertexPosition, VertexTexture1, VertexEmpty>(parameters),
++			GlbMeshType.PositionNormal | GlbMeshType.Color1TextureN | GlbMeshType.Empty => BuildSubMeshes<VertexPositionNormal, VertexTexture1, VertexEmpty>(parameters),
++			GlbMeshType.PositionNormalTangent | GlbMeshType.Color1TextureN | GlbMeshType.Empty => BuildSubMeshes<VertexPositionNormalTangent, VertexTexture1, VertexEmpty>(parameters),
++			GlbMeshType.Position | GlbMeshType.TextureN | GlbMeshType.Empty => BuildSubMeshes<VertexPosition, VertexTexture1, VertexEmpty>(parameters),
++			GlbMeshType.PositionNormal | GlbMeshType.TextureN | GlbMeshType.Empty => BuildSubMeshes<VertexPositionNormal, VertexTexture1, VertexEmpty>(parameters),
++			GlbMeshType.PositionNormalTangent | GlbMeshType.TextureN | GlbMeshType.Empty => BuildSubMeshes<VertexPositionNormalTangent, VertexTexture1, VertexEmpty>(parameters),
++			_ => BuildSubMeshesForMeshType(parameters),
++		};
++	}
++
++	private static IMeshBuilder<MaterialBuilder> BuildSubMeshesForMeshType(BuildSubMeshParameters parameters)
++	{
++		return parameters.MeshData.GetMeshType() switch
++		{
++			GlbMeshType.Position | GlbMeshType.Color1 | GlbMeshType.Empty => BuildSubMeshes<VertexPosition, VertexEmpty, VertexEmpty>(parameters),
++			GlbMeshType.PositionNormal | GlbMeshType.Color1 | GlbMeshType.Empty => BuildSubMeshes<VertexPositionNormal, VertexEmpty, VertexEmpty>(parameters),
++			GlbMeshType.PositionNormalTangent | GlbMeshType.Color1 | GlbMeshType.Empty => BuildSubMeshes<VertexPositionNormalTangent, VertexEmpty, VertexEmpty>(parameters),
++			_ => throw new ArgumentOutOfRangeException(nameof(parameters), parameters.MeshData.GetMeshType(), "Rock cliff mesh type with vertex colors is not supported."),
++		};
++	}
++
+ 	private static MeshBuilder<TvG, TvM, TvS> BuildSubMeshes<TvG, TvM, TvS>(BuildSubMeshParameters parameters)
+ 		where TvG : unmanaged, IVertexGeometry
+ 		where TvM : unmanaged, IVertexMaterial
+diff --git a/Source/AssetRipper.Export.Modules.Models/GlbTerrainBuilder.cs b/Source/AssetRipper.Export.Modules.Models/GlbTerrainBuilder.cs
+index 004d1dd10..296a78fe2 100644
+--- a/Source/AssetRipper.Export.Modules.Models/GlbTerrainBuilder.cs
++++ b/Source/AssetRipper.Export.Modules.Models/GlbTerrainBuilder.cs
+@@ -43,7 +43,7 @@ public static class GlbTerrainBuilder
+ 		{
+ 			for (int x = 0; x < w; x++)
+ 			{
+-				Vector3 pos = new Vector3(-(startY + y), tData[startX + x, startY + y], startX + x) * meshScale;
++				Vector3 pos = new Vector3(startX + x, tData[startX + x, startY + y], startY + y) * meshScale;
+ 				Vector2 uv = new Vector2(x, y) * uvScale;
+ 				vertices[y * w + x] = new VertexBuilder<VertexPosition, VertexTexture1, VertexEmpty>(new VertexPosition(pos), new VertexTexture1(uv));
+ 			}

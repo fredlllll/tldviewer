@@ -17,6 +17,7 @@ project, no PNG texture dump, no per-mesh GLB files.
 |---|---|
 | OS | Windows (paths are tuned for the VirtualBox shares `Z:` and `Y:`) |
 | SDK | .NET 10 SDK |
+| Git | on `PATH`; the build applies `vendor/AssetRipper.patch` with `git apply` |
 | Viewer (optional) | Unity 6 (tested with 6000.3.21f1) |
 | Game | The Long Dark with Wintermute installed, campaign data at `\\VBoxSvr\TheLongDark\tld_dlc\wintermute\tld_Data` |
 
@@ -54,6 +55,11 @@ If you already cloned without submodules:
 ```powershell
 git submodule update --init --recursive
 ```
+
+The build applies `vendor/AssetRipper.patch` to the submodule automatically, so
+there is no separate bootstrap step. See [PATCHES.md](PATCHES.md) for what the
+patch contains and how to refresh it when AssetRipper is updated. The build
+leaves the submodule's working tree patched, which is expected and harmless.
 
 ## Run
 

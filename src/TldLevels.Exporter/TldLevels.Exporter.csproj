@@ -13,9 +13,60 @@
 		<CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
 	</PropertyGroup>
 
+	<PropertyGroup>
+		<!--
+			The submodule is pinned to AssetRipper's 2.0.0 tag, which exists on the
+			upstream remote and therefore clones cleanly. The TLD changes live in
+			vendor/AssetRipper.patch and are applied here, before the referenced
+			projects are built, so initialising the submodule and then running
+			dotnet build works on a fresh clone.
+		-->
+		<AssetRipperRoot>$(MSBuildThisFileDirectory)..\..\vendor\AssetRipper</AssetRipperRoot>
+		<AssetRipperPatch>$(MSBuildThisFileDirectory)..\..\vendor\AssetRipper.patch</AssetRipperPatch>
+	</PropertyGroup>
+
 	<ItemGroup>
-		<!-- AssetRipper is vendored as a git submodule pinned to tag 2.0.0. -->
-		<ProjectReference Include="..\..\vendor\AssetRipper\Source\AssetRipper.Export.UnityProjects\AssetRipper.Export.UnityProjects.csproj" />
+		<ProjectReference Include="$(AssetRipperRoot)\Source\AssetRipper.Export.UnityProjects\AssetRipper.Export.UnityProjects.csproj" />
 	</ItemGroup>
+
+	<!-- Idempotent: only applies the patch when the submodule is still pristine. -->
+	<Target Name="ApplyAssetRipperPatch"
+		BeforeTargets="ResolveProjectReferences"
+		Condition="Exists('$(AssetRipperPatch)') And Exists('$(AssetRipperRoot)\Source\AssetRipper.Export.UnityProjects\AssetRipper.Export.UnityProjects.csproj')">
+
+		<!--
+			IgnoreStandardErrorWarningFormat is required: git writes "patch does
+			not apply" to stderr when the patch is already in place, and MSBuild
+			would otherwise log that as build errors even though the non-zero exit
+			code is expected and ignored.
+		-->
+		<Exec Command="git -C &quot;$(AssetRipperRoot)&quot; apply --check &quot;$(AssetRipperPatch)&quot;"
+			IgnoreExitCode="true"
+			IgnoreStandardErrorWarningFormat="true"
+			StandardOutputImportance="low"
+			StandardErrorImportance="low">
+			<Output TaskParameter="ExitCode" PropertyName="_AssetRipperPatchApplies" />
+		</Exec>
+
+		<!-- Already patched? Then the patch must reverse cleanly. -->
+		<Exec Command="git -C &quot;$(AssetRipperRoot)&quot; apply --check --reverse &quot;$(AssetRipperPatch)&quot;"
+			IgnoreExitCode="true"
+			IgnoreStandardErrorWarningFormat="true"
+			StandardOutputImportance="low"
+			StandardErrorImportance="low">
+			<Output TaskParameter="ExitCode" PropertyName="_AssetRipperPatchApplied" />
+		</Exec>
+
+		<Message Importance="high"
+			Text="Applying vendor/AssetRipper.patch to the AssetRipper submodule."
+			Condition="'$(_AssetRipperPatchApplies)' == '0'" />
+
+		<Exec Command="git -C &quot;$(AssetRipperRoot)&quot; apply --whitespace=nowarn &quot;$(AssetRipperPatch)&quot;"
+			Condition="'$(_AssetRipperPatchApplies)' == '0'" />
+
+		<Warning
+			Condition="'$(_AssetRipperPatchApplies)' != '0' And '$(_AssetRipperPatchApplied)' != '0'"
+			Text="vendor/AssetRipper.patch neither applies to vendor/AssetRipper nor is already applied. If the submodule was edited by hand this is expected; otherwise reset it with 'git submodule update --init --force vendor/AssetRipper' and build again." />
+	</Target>
 
 </Project>
