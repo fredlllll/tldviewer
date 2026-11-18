@@ -52,6 +52,7 @@ public sealed class ViewerUi : MonoBehaviour
     private bool restoringCameraFocus;
     private int lastPointerDownFrame = -1;
     private VisualElement lastFocused;
+    private VisualElement navigationRoot;
     private string lastStatus;
     private string lastHint;
 
@@ -199,7 +200,51 @@ public sealed class ViewerUi : MonoBehaviour
         }
 
         EnforceClickOnlyFocus();
+        InstallNavigationGuard();
         UpdateScale();
+    }
+
+    /// <summary>
+    /// UI Toolkit turns the legacy Horizontal/Vertical axes - which include
+    /// W, A, S and D - into directional navigation events. They moved focus
+    /// into the level list and path fields while flying, so nothing in this
+    /// panel should ever take part in keyboard navigation.
+    /// </summary>
+    private void InstallNavigationGuard()
+    {
+        IPanel panel = root != null ? root.panel : null;
+        if (panel == null || navigationRoot == panel.visualTree)
+        {
+            return;
+        }
+
+        navigationRoot = panel.visualTree;
+        navigationRoot.RegisterCallback<NavigationMoveEvent>(OnNavigationMove, TrickleDown.TrickleDown);
+        navigationRoot.RegisterCallback<NavigationSubmitEvent>(OnNavigationSubmit, TrickleDown.TrickleDown);
+        navigationRoot.RegisterCallback<NavigationCancelEvent>(OnNavigationCancel, TrickleDown.TrickleDown);
+    }
+
+    private void OnNavigationMove(NavigationMoveEvent evt) => BlockNavigation(evt);
+
+    private void OnNavigationSubmit(NavigationSubmitEvent evt) => BlockNavigation(evt);
+
+    private void OnNavigationCancel(NavigationCancelEvent evt) => BlockNavigation(evt);
+
+    private void BlockNavigation(EventBase evt)
+    {
+        evt.StopPropagation();
+        root.panel?.focusController.IgnoreEvent(evt);
+    }
+
+    private static void MakeClickOnly(params VisualElement[] elements)
+    {
+        foreach (VisualElement element in elements)
+        {
+            if (element != null)
+            {
+                element.focusable = false;
+            }
+        }
     }
 
     /// <summary>
@@ -264,6 +309,18 @@ public sealed class ViewerUi : MonoBehaviour
             Debug.LogError("[viewer] ViewerUI.uxml is missing required elements.");
             return;
         }
+
+        // Only text fields may hold keyboard focus; everything else is
+        // mouse-driven so the fly camera keeps the keys.
+        MakeClickOnly(
+            rescanButton,
+            clearFilterButton,
+            loadPathButton,
+            frameButton,
+            panelToggleButton,
+            settingsToggleButton,
+            radiusSlider,
+            levelList);
 
         rescanButton.clicked += () => RescanRequested?.Invoke();
         clearFilterButton.clicked += () => ClearFilterRequested?.Invoke();
@@ -443,6 +500,7 @@ public sealed class ViewerUi : MonoBehaviour
             {
                 text = level.Label,
                 tooltip = level.SourcePath,
+                focusable = false,
             };
             button.AddToClassList("level-button");
             button.AddToClassList(level.Exported ? "level-exported" : "level-convert");

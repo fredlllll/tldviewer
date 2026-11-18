@@ -77,6 +77,18 @@ public static class ViewerUiSmokeTest
                 throw new InvalidOperationException("Viewer scene has no directional sun light.");
             }
 
+            Quaternion sunRotation = sun.transform.rotation;
+            float sunLength = Mathf.Sqrt(
+                sunRotation.x * sunRotation.x + sunRotation.y * sunRotation.y +
+                sunRotation.z * sunRotation.z + sunRotation.w * sunRotation.w);
+            if (Mathf.Abs(sunLength - 1f) > 0.001f)
+            {
+                // A non-unit rotation makes the light direction non-normalized,
+                // which trips Unity's IsNormalized(dir) assert every repaint.
+                throw new InvalidOperationException(
+                    $"Sun rotation is not normalized (length {sunLength:F4}).");
+            }
+
             UIDocument document = UnityEngine.Object.FindFirstObjectByType<UIDocument>();
             if (document == null)
             {

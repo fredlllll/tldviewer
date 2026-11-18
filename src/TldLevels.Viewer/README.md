@@ -77,6 +77,10 @@ The UI and the fly camera share the keyboard, so they take turns:
   field cannot open its text menu or steal the keys;
 - clicking anywhere that is not a text field gives the keyboard back to the
   camera;
+- WASD never triggers UI Toolkit's directional navigation: the navigation
+  events that both the event system and the scroll view listen to are stopped at
+  the panel root, so the level list no longer scrolls and focus no longer drifts
+  through the controls while flying;
 - text fields can only be focused by clicking them: if the panel ever hands
   focus to the first field on its own (for example on an unrelated key press),
   the viewer takes it back within a frame, so WASD keeps flying.
