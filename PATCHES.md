@@ -60,3 +60,16 @@ built from.
 shows up as `modified: vendor/AssetRipper (modified content)` until you run
 `git -C vendor/AssetRipper checkout -- .` (or `git submodule update`), after
 which the next build patches it again.
+
+## If `vendor/AssetRipper` is empty
+
+`dotnet build` stops with one error:
+
+```
+vendor/AssetRipper is not checked out, so its projects cannot be built.
+Run 'git submodule update --init --recursive' in the repository root, then build again.
+```
+
+Run that command and build again. Without the check the missing project
+reference merely produces a warning and then dozens of `CS0246` errors for every
+AssetRipper type, which is hard to read and easy to mistake for a code problem.

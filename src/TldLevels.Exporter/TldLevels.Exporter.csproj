@@ -23,16 +23,27 @@
 		-->
 		<AssetRipperRoot>$(MSBuildThisFileDirectory)..\..\vendor\AssetRipper</AssetRipperRoot>
 		<AssetRipperPatch>$(MSBuildThisFileDirectory)..\..\vendor\AssetRipper.patch</AssetRipperPatch>
+		<AssetRipperProject>$(AssetRipperRoot)\Source\AssetRipper.Export.UnityProjects\AssetRipper.Export.UnityProjects.csproj</AssetRipperProject>
 	</PropertyGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="$(AssetRipperRoot)\Source\AssetRipper.Export.UnityProjects\AssetRipper.Export.UnityProjects.csproj" />
+		<ProjectReference Include="$(AssetRipperProject)" />
 	</ItemGroup>
+
+	<!--
+		Fail with one actionable line instead of a wall of CS0246 errors when the
+		submodule is missing: the ProjectReference above then silently resolves
+		to nothing and every AssetRipper type becomes "not found".
+	-->
+	<Target Name="CheckAssetRipperSubmodule" BeforeTargets="PrepareForBuild">
+		<Error Condition="!Exists('$(AssetRipperProject)')"
+			Text="vendor/AssetRipper is not checked out, so its projects cannot be built. Run 'git submodule update --init --recursive' in the repository root, then build again." />
+	</Target>
 
 	<!-- Idempotent: only applies the patch when the submodule is still pristine. -->
 	<Target Name="ApplyAssetRipperPatch"
 		BeforeTargets="ResolveProjectReferences"
-		Condition="Exists('$(AssetRipperPatch)') And Exists('$(AssetRipperRoot)\Source\AssetRipper.Export.UnityProjects\AssetRipper.Export.UnityProjects.csproj')">
+		Condition="Exists('$(AssetRipperPatch)') And Exists('$(AssetRipperProject)')">
 
 		<!--
 			IgnoreStandardErrorWarningFormat is required: git writes "patch does

@@ -367,7 +367,8 @@ public sealed class LevelLoader : MonoBehaviour
             string packagePath = Path.Combine(exportFolder, level.SceneName + ".viewer");
             if (process.ExitCode != 0 || !File.Exists(Path.Combine(packagePath, "manifest.json")))
             {
-                string detail = LastLine(error) ?? LastLine(output) ?? "see export.log";
+                string detail = FindSubmoduleHint(output) ?? FindSubmoduleHint(error)
+                    ?? LastLine(error) ?? LastLine(output) ?? "see export.log";
                 status = $"Conversion failed (exit {process.ExitCode}): {detail}";
                 Debug.LogError($"[exporter] {error}\n{output}");
                 return false;
@@ -487,6 +488,21 @@ public sealed class LevelLoader : MonoBehaviour
         }
 
         return Path.GetFullPath(Path.Combine(Application.dataPath, "..", "..", ".."));
+    }
+
+    /// <summary>
+    /// The exporter build fails with a wall of CS0246 errors when the
+    /// AssetRipper submodule was never checked out. Turn that into the command
+    /// that fixes it instead of echoing a localized MSBuild summary line.
+    /// </summary>
+    private static string FindSubmoduleHint(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return null;
+
+        return text.Contains("git submodule update --init", StringComparison.Ordinal)
+            ? "vendor/AssetRipper is missing. Run 'git submodule update --init --recursive' in the repository root, then convert again."
+            : null;
     }
 
     private static string LastLine(string text)
