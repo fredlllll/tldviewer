@@ -87,11 +87,11 @@ public sealed class LevelLoader : MonoBehaviour
 
         if (packageStreamer != null && packageStreamer.IsRunning)
         {
-            ui.SetStreamer(true, packageStreamer.StatusLine, packageStreamer.LoadRadius, packageStreamer.UnloadRadius);
+            ui.SetStreamer(true, packageStreamer.StatusLine, packageStreamer.LoadRadius);
         }
         else
         {
-            ui.SetStreamer(false, string.Empty, 0f, 0f);
+            ui.SetStreamer(false, string.Empty, 0f);
         }
 
         ui.SetFrameEnabled(IsSomethingLoaded() && !isLoading);
@@ -234,7 +234,6 @@ public sealed class LevelLoader : MonoBehaviour
         }
 
         packageStreamer.LoadRadius = radius;
-        packageStreamer.UnloadRadius = radius * 1.4f;
     }
 
     private void FrameLoadedLevel()

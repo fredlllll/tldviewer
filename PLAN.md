@@ -357,8 +357,10 @@ draw-mesh extraction or terrain rebuilding regressed.
 
 ## 8. Viewer runtime
 
-The Unity viewer streams cells nearest-first, keeps them inside a radius,
-instances the shared meshes and selects a LOD per instance at distance.
+The Unity viewer streams cells nearest-first, loads a cell once its centre is
+inside the streaming radius and never releases it again: moving away swaps the
+cell to the coarser authored LOD in place. It instances the shared meshes and
+selects a LOD per instance at distance.
 
 - **On-demand conversion.** The level list comes from the game data folder, not
   from existing packages. Each button shows the source file size and whether a

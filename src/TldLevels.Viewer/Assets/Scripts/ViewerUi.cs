@@ -342,7 +342,7 @@ public sealed class ViewerUi : MonoBehaviour
         SetLevelEmpty(null);
         SetBusy(false);
         SetFrameEnabled(false);
-        SetStreamer(false, string.Empty, 0f, 0f);
+        SetStreamer(false, string.Empty, 0f);
 
         ready = true;
         root.pickingMode = pointerLocked ? PickingMode.Ignore : PickingMode.Position;
@@ -553,7 +553,7 @@ public sealed class ViewerUi : MonoBehaviour
         statusLabel.text = message;
     }
 
-    public void SetStreamer(bool visible, string message, float radius, float unloadRadius)
+    public void SetStreamer(bool visible, string message, float radius)
     {
         if (!ready || radiusRow == null)
         {
@@ -577,7 +577,9 @@ public sealed class ViewerUi : MonoBehaviour
             radiusSlider.SetValueWithoutNotify(radius);
         }
 
-        string radiusText = $"Load radius {radius:F0} m (unload {unloadRadius:F0} m)";
+        // Cells never unload, so the slider only decides when a cell is first
+        // loaded; saying so avoids the impression that flying away frees it.
+        string radiusText = $"Load radius {radius:F0} m";
         if (radiusLabel.text != radiusText)
         {
             radiusLabel.text = radiusText;

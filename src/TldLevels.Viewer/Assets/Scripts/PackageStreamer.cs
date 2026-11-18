@@ -10,9 +10,11 @@ namespace TldLevels.Viewer
     /// <summary>
     /// Streams a <c>level.viewer</c> package written by the exporter.
     /// <para>
-    /// Cells are loaded nearest-first with a frame-time budget, unloaded once
-    /// the camera is far enough away, and resolved to a LOD file listed in the
-    /// manifest. The viewer never guesses which LODs exist on disk.
+    /// Cells are loaded nearest-first with a frame-time budget and resolved to a
+    /// LOD file listed in the manifest. A loaded cell is never removed again:
+    /// flying away only swaps its geometry to the coarser authored LOD, so the
+    /// level never disappears behind the camera. The viewer never guesses which
+    /// LODs exist on disk.
     /// </para>
     /// <para>
     /// Cell files only contain terrain, sky and oversized geometry. Trees,
@@ -23,11 +25,8 @@ namespace TldLevels.Viewer
     /// </summary>
     public sealed class PackageStreamer : MonoBehaviour
     {
-        [Tooltip("Cells whose centre is inside this radius are loaded (metres).")]
+        [Tooltip("Cells whose centre is inside this radius are loaded (metres). Once loaded they stay.")]
         public float LoadRadius = 1200f;
-
-        [Tooltip("Loaded cells beyond this radius are released (metres).")]
-        public float UnloadRadius = 1700f;
 
         [Tooltip("Distance between LOD switches, in cell widths.")]
         public float LodDistanceCells = 1.5f;
@@ -185,17 +184,20 @@ namespace TldLevels.Viewer
 
                 if (cell.State == CellState.Loaded)
                 {
+                    // Loaded cells are never released; a different LOD is
+                    // swapped into the same cell instead. The hysteresis keeps
+                    // the camera from thrashing across a LOD boundary.
                     int desiredLevel = DesiredLod(distance);
                     PackageLodManifest target = cell.Data.SelectLod(desiredLevel);
                     bool lodChanged = target != null && target.level != cell.LoadedLod
                         && Mathf.Abs(distance - cell.LoadedDistance) > GetLodStep() * 0.25f;
-                    if (distance > UnloadRadius || lodChanged)
+                    if (lodChanged && cell.NextRetryTime <= Time.unscaledTime)
                     {
-                        ReleaseCell(cell);
+                        cell.PendingDistance = distance;
+                        wanted.Add(cell);
                     }
                 }
-
-                if (cell.State == CellState.Idle && cell.NextRetryTime <= Time.unscaledTime && distance <= LoadRadius)
+                else if (cell.NextRetryTime <= Time.unscaledTime && distance <= LoadRadius)
                 {
                     cell.PendingDistance = distance;
                     wanted.Add(cell);
@@ -237,7 +239,7 @@ namespace TldLevels.Viewer
 
             Cell cell = wanted[0];
             wanted.RemoveAt(0);
-            if (cell.State != CellState.Idle)
+            if (cell.State == CellState.Loading)
             {
                 return;
             }
@@ -249,6 +251,18 @@ namespace TldLevels.Viewer
         private async Task LoadCellAsync(Cell cell)
         {
             int loadGeneration = generation;
+
+            // A loaded cell is never torn down before its replacement is ready:
+            // a LOD swap builds the coarser variant alongside the old one, so
+            // the level never shows a hole while the file is read.
+            bool replacing = cell.State == CellState.Loaded;
+            GameObject previousRoot = cell.Root;
+            GltfImport previousImport = cell.Import;
+            int previousLod = cell.LoadedLod;
+            float previousDistance = cell.LoadedDistance;
+            long previousTriangles = cell.LoadedTriangles;
+            InstanceRuntime[] previousInstances = cell.Instances.ToArray();
+
             cell.State = CellState.Loading;
 
             GameObject root = null;
@@ -330,6 +344,22 @@ namespace TldLevels.Viewer
                     return;
                 }
 
+                if (replacing)
+                {
+                    // Retire the old geometry now that the new one is complete.
+                    // Hiding it first keeps the last frame from showing a
+                    // renderer whose meshes were just disposed.
+                    if (previousRoot != null)
+                    {
+                        previousRoot.SetActive(false);
+                        Destroy(previousRoot);
+                    }
+
+                    previousImport?.Dispose();
+                    LoadedCount = Mathf.Max(0, LoadedCount - 1);
+                    LoadedTriangles -= previousTriangles;
+                }
+
                 cell.Root = root;
                 cell.Import = import;
                 cell.LoadedLod = lod?.level ?? -1;
@@ -353,10 +383,25 @@ namespace TldLevels.Viewer
                 }
 
                 import?.Dispose();
-                cell.Root = null;
-                cell.Import = null;
                 cell.Instances.Clear();
-                cell.State = CellState.Idle;
+
+                if (replacing)
+                {
+                    // Keep the previous variant on screen and try the swap again
+                    // after a pause instead of leaving a gap in the level.
+                    cell.Instances.AddRange(previousInstances);
+                    cell.LoadedLod = previousLod;
+                    cell.LoadedDistance = previousDistance;
+                    cell.LoadedTriangles = previousTriangles;
+                    cell.State = CellState.Loaded;
+                }
+                else
+                {
+                    cell.Root = null;
+                    cell.Import = null;
+                    cell.State = CellState.Idle;
+                }
+
                 cell.NextRetryTime = Time.unscaledTime + 5f;
                 Debug.LogWarning($"[PackageStreamer] {cell.Data.id}: {exception.Message}");
             }
