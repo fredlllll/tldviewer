@@ -41,11 +41,12 @@ The viewer auto-detects a Release or Debug build of the exporter in
 The **Exporter** field can point at the `.exe`, `.dll` or `.csproj` if the
 viewer runs outside the repository.
 
-When a package is open, a slider sets the streaming radius (256–4000 m): a cell
-loads once its centre is inside that radius, and stays loaded from then on. The
-radius therefore controls how early a cell appears, not how long it lives —
-flying away only swaps the cell's geometry to the coarser authored LOD, built
-beside the old variant so the level never shows a hole while it is read.
+Every cell in the package is loaded as soon as the package opens, nearest first,
+and nothing is ever released. Distance only picks detail: a cell swaps to the
+coarser authored LOD when you move away, and the new variant is built beside the
+old one so the level never shows a hole while it is read. There is no streaming
+radius to fly into, so a level with dozens of cells is fully visible from the
+start rather than only around the camera.
 Cell files and shared assets are read on background threads, and all import
 work is spread across frames by a shared budget. Trees, houses and props are
 instantiated from the shared asset library, with a LOD chosen per instance. The

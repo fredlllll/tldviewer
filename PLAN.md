@@ -357,10 +357,10 @@ draw-mesh extraction or terrain rebuilding regressed.
 
 ## 8. Viewer runtime
 
-The Unity viewer streams cells nearest-first, loads a cell once its centre is
-inside the streaming radius and never releases it again: moving away swaps the
-cell to the coarser authored LOD in place. It instances the shared meshes and
-selects a LOD per instance at distance.
+The Unity viewer loads every cell of a package up front, nearest first, and never
+releases one: locating is not distance-driven, only detail is, so moving away
+swaps a cell to the coarser authored LOD in place. It instances the shared meshes
+and selects a LOD per instance at distance.
 
 - **On-demand conversion.** The level list comes from the game data folder, not
   from existing packages. Each button shows the source file size and whether a
@@ -378,8 +378,8 @@ selects a LOD per instance at distance.
 - **No generated content.** The viewer instantiates only the meshes, materials
   and LOD variants listed in the package manifest; it never probes for files or
   builds fallback geometry.
-- **UI Toolkit overlay.** The level list, path fields, streaming radius and
-  status lines are a `UIDocument` built from `Assets/UI/Resources/ViewerUI.uxml`
+- **UI Toolkit overlay.** The level list, path fields and status lines are a
+  `UIDocument` built from `Assets/UI/Resources/ViewerUI.uxml`
   and `ViewerUI.uss`. The panel uses percentage sizing inside the viewport with
   a `ConstantPixelSize` scale clamped to 0.8–1.5, so it fits small Game views
   without shrinking text into illegibility.

@@ -26,11 +26,9 @@ public sealed class ViewerUi : MonoBehaviour
     private VisualElement root;
     private VisualElement panel;
     private VisualElement settings;
-    private VisualElement radiusRow;
     private Label levelEmpty;
     private Label statusLabel;
     private Label streamerLabel;
-    private Label radiusLabel;
     private Label hintLabel;
     private Label exporterWarning;
     private TextField exportFolderField;
@@ -39,7 +37,6 @@ public sealed class ViewerUi : MonoBehaviour
     private TextField filterField;
     private TextField packagePathField;
     private ScrollView levelList;
-    private Slider radiusSlider;
     private Button rescanButton;
     private Button clearFilterButton;
     private Button loadPathButton;
@@ -62,7 +59,6 @@ public sealed class ViewerUi : MonoBehaviour
     public event Action<int> LevelSelected;
     public event Action LoadPathRequested;
     public event Action FrameRequested;
-    public event Action<float> RadiusChanged;
 
     public string ExportFolder
     {
@@ -283,11 +279,9 @@ public sealed class ViewerUi : MonoBehaviour
 
         panel = root.Q<VisualElement>("panel");
         settings = root.Q<VisualElement>("settings");
-        radiusRow = root.Q<VisualElement>("radius-row");
         levelEmpty = root.Q<Label>("level-empty");
         statusLabel = root.Q<Label>("status");
         streamerLabel = root.Q<Label>("streamer-status");
-        radiusLabel = root.Q<Label>("radius-label");
         hintLabel = root.Q<Label>("hint");
         exporterWarning = root.Q<Label>("exporter-warning");
         exportFolderField = root.Q<TextField>("export-folder");
@@ -296,7 +290,6 @@ public sealed class ViewerUi : MonoBehaviour
         filterField = root.Q<TextField>("filter");
         packagePathField = root.Q<TextField>("package-path");
         levelList = root.Q<ScrollView>("level-list");
-        radiusSlider = root.Q<Slider>("radius");
         rescanButton = root.Q<Button>("rescan");
         clearFilterButton = root.Q<Button>("clear-filter");
         loadPathButton = root.Q<Button>("load-path");
@@ -319,7 +312,6 @@ public sealed class ViewerUi : MonoBehaviour
             frameButton,
             panelToggleButton,
             settingsToggleButton,
-            radiusSlider,
             levelList);
 
         rescanButton.clicked += () => RescanRequested?.Invoke();
@@ -327,7 +319,6 @@ public sealed class ViewerUi : MonoBehaviour
         filterField.RegisterValueChangedCallback(evt => FilterChanged?.Invoke(evt.newValue ?? string.Empty));
         loadPathButton.clicked += () => LoadPathRequested?.Invoke();
         frameButton.clicked += () => FrameRequested?.Invoke();
-        radiusSlider.RegisterValueChangedCallback(evt => RadiusChanged?.Invoke(evt.newValue));
         panelToggleButton.clicked += TogglePanel;
         settingsToggleButton.clicked += ToggleSettings;
 
@@ -342,7 +333,7 @@ public sealed class ViewerUi : MonoBehaviour
         SetLevelEmpty(null);
         SetBusy(false);
         SetFrameEnabled(false);
-        SetStreamer(false, string.Empty, 0f);
+        SetStreamer(false, string.Empty);
 
         ready = true;
         root.pickingMode = pointerLocked ? PickingMode.Ignore : PickingMode.Position;
@@ -553,36 +544,22 @@ public sealed class ViewerUi : MonoBehaviour
         statusLabel.text = message;
     }
 
-    public void SetStreamer(bool visible, string message, float radius)
+    public void SetStreamer(bool visible, string message)
     {
-        if (!ready || radiusRow == null)
+        if (!ready || streamerLabel == null)
         {
             return;
         }
 
-        bool wasVisible = radiusRow.style.display != DisplayStyle.None;
+        bool wasVisible = streamerLabel.style.display != DisplayStyle.None;
         if (wasVisible != visible)
         {
-            radiusRow.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
             streamerLabel.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
         }
 
         if (!visible)
         {
             return;
-        }
-
-        if (Mathf.Abs(radiusSlider.value - radius) > 0.5f)
-        {
-            radiusSlider.SetValueWithoutNotify(radius);
-        }
-
-        // Cells never unload, so the slider only decides when a cell is first
-        // loaded; saying so avoids the impression that flying away frees it.
-        string radiusText = $"Load radius {radius:F0} m";
-        if (radiusLabel.text != radiusText)
-        {
-            radiusLabel.text = radiusText;
         }
 
         if (streamerLabel.text != message)

@@ -32,10 +32,6 @@
                         <ui:Button name="frame-level" text="Frame level (F)" class="tool-button" />
                     </ui:VisualElement>
                 </ui:VisualElement>
-                <ui:VisualElement name="radius-row" class="radius-row">
-                    <ui:Label name="radius-label" text="Load radius" class="field-label" />
-                    <ui:Slider name="radius" low-value="256" high-value="4000" />
-                </ui:VisualElement>
                 <ui:Label name="streamer-status" class="streamer-status" />
                 <ui:Label name="status" class="status" />
             </ui:VisualElement>

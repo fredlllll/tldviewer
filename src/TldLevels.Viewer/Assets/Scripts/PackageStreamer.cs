@@ -10,11 +10,12 @@ namespace TldLevels.Viewer
     /// <summary>
     /// Streams a <c>level.viewer</c> package written by the exporter.
     /// <para>
-    /// Cells are loaded nearest-first with a frame-time budget and resolved to a
-    /// LOD file listed in the manifest. A loaded cell is never removed again:
-    /// flying away only swaps its geometry to the coarser authored LOD, so the
-    /// level never disappears behind the camera. The viewer never guesses which
-    /// LODs exist on disk.
+    /// Cells are all loaded when the package opens, nearest first with a
+    /// frame-time budget, and resolved to a LOD file listed in the manifest.
+    /// Distance only selects the LOD: a loaded cell is never removed, and flying
+    /// away swaps its geometry to the coarser authored variant, so the level
+    /// never disappears behind the camera. The viewer never guesses which LODs
+    /// exist on disk.
     /// </para>
     /// <para>
     /// Cell files only contain terrain, sky and oversized geometry. Trees,
@@ -25,9 +26,6 @@ namespace TldLevels.Viewer
     /// </summary>
     public sealed class PackageStreamer : MonoBehaviour
     {
-        [Tooltip("Cells whose centre is inside this radius are loaded (metres). Once loaded they stay.")]
-        public float LoadRadius = 1200f;
-
         [Tooltip("Distance between LOD switches, in cell widths.")]
         public float LodDistanceCells = 1.5f;
 
@@ -197,8 +195,10 @@ namespace TldLevels.Viewer
                         wanted.Add(cell);
                     }
                 }
-                else if (cell.NextRetryTime <= Time.unscaledTime && distance <= LoadRadius)
+                else if (cell.NextRetryTime <= Time.unscaledTime)
                 {
+                    // Every cell of the package is loaded, nearest first; there
+                    // is no streaming radius to fly into.
                     cell.PendingDistance = distance;
                     wanted.Add(cell);
                 }

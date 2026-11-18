@@ -48,7 +48,6 @@ public sealed class LevelLoader : MonoBehaviour
         ui.LevelSelected += LoadLevelById;
         ui.LoadPathRequested += () => Load(ui.PackagePath);
         ui.FrameRequested += FrameLoadedLevel;
-        ui.RadiusChanged += SetRadius;
 
         exportFolder = PlayerPrefs.GetString(ExportFolderKey, DefaultExportFolder);
         gameFolder = PlayerPrefs.GetString(GameFolderKey, DefaultGameFolder);
@@ -87,11 +86,11 @@ public sealed class LevelLoader : MonoBehaviour
 
         if (packageStreamer != null && packageStreamer.IsRunning)
         {
-            ui.SetStreamer(true, packageStreamer.StatusLine, packageStreamer.LoadRadius);
+            ui.SetStreamer(true, packageStreamer.StatusLine);
         }
         else
         {
-            ui.SetStreamer(false, string.Empty, 0f);
+            ui.SetStreamer(false, string.Empty);
         }
 
         ui.SetFrameEnabled(IsSomethingLoaded() && !isLoading);
@@ -224,16 +223,6 @@ public sealed class LevelLoader : MonoBehaviour
     {
         ui.Filter = string.Empty;
         RebuildLevelList();
-    }
-
-    private void SetRadius(float radius)
-    {
-        if (packageStreamer == null)
-        {
-            return;
-        }
-
-        packageStreamer.LoadRadius = radius;
     }
 
     private void FrameLoadedLevel()
