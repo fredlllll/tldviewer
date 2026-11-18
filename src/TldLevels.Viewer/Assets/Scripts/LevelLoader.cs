@@ -431,7 +431,10 @@ public sealed class LevelLoader : MonoBehaviour
 
             packageStreamer.Initialize(manifest, path);
             FrameLoadedLevel();
-            status = $"Streaming {manifest.level} ({manifest.cells.Length} cells). Use F to reframe.";
+            string includes = manifest.includes is { Length: > 0 }
+                ? $" + {string.Join(" + ", manifest.includes)}"
+                : string.Empty;
+            status = $"Streaming {manifest.level}{includes} ({manifest.cells.Length} cells). Use F to reframe.";
         }
         catch (Exception exception)
         {

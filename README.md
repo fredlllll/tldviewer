@@ -110,12 +110,15 @@ Every level is its own checkpoint:
 
 Wintermute often stores an interior twice: the room shell in one level file
 (`level2`) and the loose props in the next (`level3`). Exported alone, the prop
-file looks like items floating in a void. Scenes whose largest mesh is under
-15 m across are therefore exported as variants containing a copy of the
-preceding art scene plus the design props. The base package keeps its own name,
-and the variant keeps the design level's name (for example `level10.viewer` is
-the base and `level11.viewer` is base 10 plus design 11). Multiple design scenes
-each receive their own independent variant.
+file looks like items floating in a void. The authoring convention marks a
+design scene in its hierarchy: its top-level groups contain `Design` but no
+`Art`, while a complete scene carries `Art` (usually next to its own `Design`
+items). Older levels without those group names are still detected by the size
+of their largest mesh (under 15 m across). Design scenes are exported as
+variants containing a copy of the preceding art scene plus the design props. The
+base package keeps its own name, and the variant keeps the design level's name
+(for example `level10.viewer` is the base and `level11.viewer` is base 10 plus
+design 11). Multiple design scenes each receive their own independent variant.
 Use `--no-merge-overlays` to export every file separately.
 
 For non-consecutive campaign content, use an explicit association such as

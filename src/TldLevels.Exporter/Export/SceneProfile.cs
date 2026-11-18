@@ -9,14 +9,20 @@ using System.Numerics;
 namespace TldLevels.Exporter.Export;
 
 /// <summary>
-/// Cheap geometry summary for one scene, used to tell a complete art scene from
-/// a design overlay.
+/// Cheap summary for one scene, used to tell a complete art scene from a design
+/// overlay.
 /// <para>
 /// Wintermute splits many interiors into two serialized files: an art scene
-/// with the room shell, and a design scene with only the loose props. Design
-/// scenes have no mesh larger than a few metres, so their maximum horizontal
-/// extent is a reliable discriminator. Exported alone they look like items
-/// floating in a void.
+/// with the room shell, and a design scene with only the loose props. The
+/// authoring convention marks that in the hierarchy: a design scene groups its
+/// props under a top-level <c>Design</c> and has no <c>Art</c> group, while an
+/// art scene carries <c>Art</c> (usually next to its own <c>Design</c> items).
+/// Exported alone, a design scene is items floating in a void.
+/// </para>
+/// <para>
+/// Older levels predate those group names and wrap everything in a neutral root
+/// such as <c>Root</c>; for those the maximum mesh extent still separates loose
+/// props from room shells.
 /// </para>
 /// </summary>
 public sealed record SceneProfile(
@@ -26,12 +32,12 @@ public sealed record SceneProfile(
 	bool IsOverlay)
 {
 	/// <summary>
-	/// Loose props and story items are smaller than this; room shells, terrain
-	/// and vehicles are larger. Measured maximum horizontal extents:
-	/// overlays 0.1-12.6 m (3, 5, 7, 11, 13, 17, 21, 25, 31); real scenes
-	/// 20.2 m and up (29 basement, 23 cinematic dam, 28 basement variant).
-	/// The threshold sits in that gap so a long cable or beam does not stop a
-	/// design scene from merging.
+	/// Fallback for scenes without <c>Art</c>/<c>Design</c> groups: loose props
+	/// and story items are smaller than this, room shells and vehicles larger.
+	/// Measured maximum horizontal extents: overlays 0.1-12.6 m (3, 5, 7, 11,
+	/// 13, 17, 21, 25, 31); real scenes 20.2 m and up (29 basement, 23 cinematic
+	/// dam, 28 basement variant). The threshold sits in that gap so a long cable
+	/// or beam does not stop a design scene from merging.
 	/// </summary>
 	public const float OverlayMaxExtent = 15.0f;
 
@@ -39,6 +45,21 @@ public sealed record SceneProfile(
 	{
 		float maxExtent = 0.0f;
 		int meshCount = 0;
+
+		bool hasDesignRoot = false;
+		bool hasArtRoot = false;
+		foreach (var root in scene.GetRoots())
+		{
+			string name = root.Name.String;
+			if (string.Equals(name, "Design", StringComparison.OrdinalIgnoreCase))
+			{
+				hasDesignRoot = true;
+			}
+			else if (string.Equals(name, "Art", StringComparison.OrdinalIgnoreCase))
+			{
+				hasArtRoot = true;
+			}
+		}
 
 		foreach (var gameObject in scene.GameObjects)
 		{
@@ -56,9 +77,9 @@ public sealed record SceneProfile(
 			Vector3 extent = mesh.LocalAABB.Extent.CastToStruct();
 			if (!IsFinite(center) || !IsFinite(extent))
 			{
-				// Unknown bounds: err on the side of treating this as a real
-				// art scene so we never hide geometry behind a bad merge.
-				return new SceneProfile(scene.Name.String, meshCount, float.PositiveInfinity, false);
+				// Unknown bounds only matter to the extent fallback; ignore the
+				// mesh instead of inventing a size for it.
+				continue;
 			}
 
 			Matrix4x4 global = GlobalMatrix(gameObject.GetTransform());
@@ -84,7 +105,12 @@ public sealed record SceneProfile(
 			maxExtent = MathF.Max(maxExtent, MathF.Max(maxX - minX, maxZ - minZ));
 		}
 
-		bool overlay = meshCount > 0 && maxExtent <= OverlayMaxExtent;
+		// Group names win when the scene uses them; a scene with Art is never an
+		// overlay even if its Design items are tiny.
+		bool overlay = meshCount > 0
+			&& (hasDesignRoot || hasArtRoot
+				? hasDesignRoot && !hasArtRoot
+				: maxExtent <= OverlayMaxExtent);
 		return new SceneProfile(scene.Name.String, meshCount, maxExtent, overlay);
 	}
 

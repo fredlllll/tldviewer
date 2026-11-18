@@ -16,6 +16,14 @@ namespace TldLevels.Viewer
     {
         public int formatVersion;
         public string level;
+
+        /// <summary>
+        /// Base scenes copied into this package. Empty for a package that only
+        /// holds its own level; a design variant lists the art scene it was
+        /// built from, for example <c>["level111"]</c>.
+        /// </summary>
+        public string[] includes;
+
         public float cellSize;
         public bool allLods;
         public int lodCount;

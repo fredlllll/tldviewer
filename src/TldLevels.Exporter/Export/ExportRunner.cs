@@ -48,10 +48,11 @@ public sealed class LevelResult
 /// <para>
 /// Wintermute often splits an interior into an art scene (room shell) and a
 /// design overlay (loose props) stored in the next level file. A design scene
-/// has no mesh larger than <see cref="SceneProfile.OverlayMaxExtent"/>, so the
-/// runner exports it as a copy of the preceding art scene plus its own props
-/// instead of leaving items floating in a void. The package keeps the overlay's
-/// name; <see cref="LevelResult.Includes"/> records the base scene.
+/// groups its props under a top-level <c>Design</c> root and has no <c>Art</c>
+/// root (see <see cref="SceneProfile"/>), so the runner exports it as a copy of
+/// the preceding art scene plus its own props instead of leaving items floating
+/// in a void. The package keeps the overlay's name;
+/// <see cref="LevelResult.Includes"/> records the base scene.
 /// </para>
 /// <para>
 /// Everything is checkpointed per level: the package is written to a
@@ -371,7 +372,8 @@ public sealed class ExportRunner
 				assets,
 				packagePath,
 				_options.CellSize,
-				includeAllLods: true);
+				includeAllLods: true,
+				includes);
 			watch.Stop();
 
 			if (result is not null)

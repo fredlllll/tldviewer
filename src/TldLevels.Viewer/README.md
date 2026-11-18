@@ -141,7 +141,9 @@ reference the same meshes and textures:
   distance, not per cell.
 - `manifest.json` is the only source of truth for which assets and LOD files
   exist; the viewer never checks the file system for optional content or
-  generates anything.
+  generates anything. Its `includes` list names the base scenes copied into a
+  design variant (empty for a normal level), which the status line shows as
+  `Streaming level112 + level111`.
 - Each cell LOD file is a complete snapshot of its cell-local geometry: objects
   without a matching authored LOD (terrain, `_LOD0`-only props) fall back to
   their closest level, so switching to a coarser LOD never removes geometry.

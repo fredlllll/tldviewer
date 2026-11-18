@@ -55,7 +55,8 @@ public static class ViewerPackageExporter
 		IEnumerable<IUnityObjectBase> assets,
 		string packageDirectory,
 		float cellSize,
-		bool includeAllLods)
+		bool includeAllLods,
+		IReadOnlyList<string>? includes = null)
 	{
 		if (cellSize <= 0f)
 		{
@@ -201,7 +202,8 @@ public static class ViewerPackageExporter
 			focusMin,
 			focusMax,
 			sharedAssets.Values,
-			cells.Values);
+			cells.Values,
+			includes ?? []);
 
 		WriteMaterials(Path.Combine(tempDirectory, "materials.json"), materialNames);
 
@@ -973,12 +975,16 @@ public static class ViewerPackageExporter
 		Vector3 focusMin,
 		Vector3 focusMax,
 		IEnumerable<SharedAsset> assets,
-		IEnumerable<PackageCell> cells)
+		IEnumerable<PackageCell> cells,
+		IReadOnlyList<string> includes)
 	{
 		var manifest = new
 		{
 			formatVersion = 2,
 			level = Path.GetFileNameWithoutExtension(packageName),
+			// Base scenes copied into this package (design overlays); empty for
+			// a package that only holds its own level.
+			includes = includes.ToArray(),
 			cellSize,
 			allLods,
 			lodCount,
